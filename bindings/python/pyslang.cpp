@@ -4,7 +4,6 @@
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
 #include "pyslang.h"
-#include "slang/syntax/AllSyntax.h"
 
 void registerAnalysis(py::module_& m, py::module_& ast);
 void registerAST(py::module_& m);
@@ -38,8 +37,6 @@ PYBIND11_MODULE(pyslang, m) {
     auto parsing = m.def_submodule("parsing", "Lexer, parser, preprocessor types");
     auto analysis = m.def_submodule("analysis", "Code analysis utilities");
     auto driver = m.def_submodule("driver", "Compilation driver");
-
-    py::classh<SyntaxFactory>(m, "SyntaxFactory");
 
     registerAnalysis(analysis, ast);
     registerAST(ast);
