@@ -48,12 +48,12 @@ PYBIND11_MODULE(pyslang, m) {
     registerUtil(m);
     registerStatements(ast);
     registerSymbols(ast);
+    registerSyntaxFactory(syntax);
     registerSyntax(syntax, parsing);
     registerSyntaxNodes0(syntax);
     registerSyntaxNodes1(syntax);
     registerSyntaxNodes2(syntax);
     registerSyntaxNodes3(syntax);
-    registerSyntaxFactory(syntax);
     registerTypes(ast);
 
     py::register_exception_translator([](std::exception_ptr p) {
