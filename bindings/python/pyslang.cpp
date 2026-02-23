@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
 #include "pyslang.h"
+#include "slang/syntax/AllSyntax.h"
 
 void registerAnalysis(py::module_& m, py::module_& ast);
 void registerAST(py::module_& m);
@@ -15,12 +16,13 @@ void registerText(py::module_& m);
 void registerUtil(py::module_& m);
 void registerStatements(py::module_& m);
 void registerSymbols(py::module_& m);
-void registerSyntax(py::module_& syntax, py::module_& parsing);
+//void registerSyntax(py::module_& syntax, py::module_& parsing);
 void registerSyntaxNodes0(py::module_& m);
 void registerSyntaxNodes1(py::module_& m);
 void registerSyntaxNodes2(py::module_& m);
 void registerSyntaxNodes3(py::module_& m);
-void registerSyntaxFactory(py::module_& m);
+py::classh<SyntaxFactory> registerSyntax(py::module_& syntax, py::module_& parsing);
+void registerSyntaxFactory(py::classh<SyntaxFactory>& cls);
 void registerTypes(py::module_& m);
 
 PYBIND11_MODULE(pyslang, m) {
@@ -48,12 +50,12 @@ PYBIND11_MODULE(pyslang, m) {
     registerUtil(m);
     registerStatements(ast);
     registerSymbols(ast);
-    registerSyntax(syntax, parsing);
+    auto syntaxFactoryCls = registerSyntax(syntax, parsing);
     registerSyntaxNodes0(syntax);
     registerSyntaxNodes1(syntax);
     registerSyntaxNodes2(syntax);
     registerSyntaxNodes3(syntax);
-    registerSyntaxFactory(syntax);
+    registerSyntaxFactory(syntaxFactoryCls);
     registerTypes(ast);
 
     py::register_exception_translator([](std::exception_ptr p) {

@@ -661,9 +661,11 @@ const std::type_info* typeFromSyntaxKind(SyntaxKind kind) {
     switch (kind) {
         case SyntaxKind::Unknown: break;
         case SyntaxKind::SyntaxList:
+            return &typeid(SyntaxList<SyntaxNode>);
         case SyntaxKind::TokenList:
+            return &typeid(TokenList);
         case SyntaxKind::SeparatedList:
-            return &typeid(SyntaxNode);
+            return &typeid(SeparatedSyntaxList<SyntaxNode>);
 """)
 
     for k, v in sorted(kindmap.items()):
@@ -1235,9 +1237,8 @@ def generatePyFactoryBindings(builddir, alltypes):
 
 #include "slang/syntax/AllSyntax.h"
 
-void registerSyntaxFactory(py::module_& m) {
-    py::classh<SyntaxFactory>(m, "SyntaxFactory",
-        "Factory for creating syntax nodes. Access via SyntaxRewriter.factory.")
+void registerSyntaxFactory(py::classh<SyntaxFactory>& cls) {
+    cls
 """
     )
 

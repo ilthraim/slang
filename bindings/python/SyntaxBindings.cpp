@@ -19,6 +19,9 @@
 #include "slang/text/SourceManager.h"
 #include "slang/util/String.h"
 
+// Forward declaration of SyntaxFactory registration so it can be referenced in methods
+extern void registerSyntaxFactory(py::classh<SyntaxFactory>& cls);
+
 namespace fs = std::filesystem;
 
 namespace {
@@ -187,7 +190,7 @@ std::shared_ptr<SyntaxTree> pySyntaxRewrite(const std::shared_ptr<SyntaxTree>& t
 
 } // end namespace
 
-void registerSyntax(py::module_& syntax, py::module_& parsing) {
+py::classh<SyntaxFactory> registerSyntax(py::module_& syntax, py::module_& parsing) {
     auto& m = syntax;
     EXPOSE_ENUM(parsing, TriviaKind);
     EXPOSE_ENUM(parsing, TokenKind);
@@ -370,6 +373,14 @@ void registerSyntax(py::module_& syntax, py::module_& parsing) {
             py::arg("mode") = CSTJsonMode::Full,
             "Convert this syntax node to JSON string with optional formatting mode");
 
+    py::classh<SyntaxListBase, SyntaxNode>(m, "SyntaxListBase");
+
+    py::classh<SyntaxList<SyntaxNode>, SyntaxListBase>(m, "SyntaxList");
+
+    py::classh<SeparatedSyntaxList<SyntaxNode>, SyntaxListBase>(m, "SeparatedSyntaxList");
+
+    py::classh<TokenList, SyntaxListBase>(m, "TokenList");
+
     py::classh<IncludeMetadata>(m, "IncludeMetadata")
         .def(py::init<>())
         .def_readonly("syntax", &IncludeMetadata::syntax)
@@ -529,6 +540,9 @@ void registerSyntax(py::module_& syntax, py::module_& parsing) {
         .def("str", &SyntaxPrinter::str)
         .def_static("printFile", &SyntaxPrinter::printFile, "tree"_a);
 
+    auto syntaxFactoryCls = py::classh<SyntaxFactory>(m, "SyntaxFactory",
+        "Factory for creating syntax nodes. Access via SyntaxRewriter.factory.");
+
     py::classh<PySyntaxRewriter>(m, "SyntaxRewriter")
         .def("remove", &PySyntaxRewriter::py_remove)
         .def("replace", &PySyntaxRewriter::py_replace, "oldNode"_a, "newNode"_a,
@@ -540,6 +554,7 @@ void registerSyntax(py::module_& syntax, py::module_& parsing) {
         .def("insertAtBack", &PySyntaxRewriter::py_insertAtBack, py::arg("list"),
              py::arg("newNode"), py::arg("separator") = Token())
         .def_property_readonly("factory", &PySyntaxRewriter::getFactory,
+                               byrefint,
                                "Get the SyntaxFactory for creating new syntax nodes")
         .def_property_readonly("alloc", &PySyntaxRewriter::getAllocator,
                                "Get the allocator for creating tokens and trivia")
@@ -583,4 +598,6 @@ void registerSyntax(py::module_& syntax, py::module_& parsing) {
         },
         byrefint, py::keep_alive<0, 2>(), py::arg("node"), py::arg("alloc"),
         "Create a deep clone of the given syntax node and all its children");
+
+    return syntaxFactoryCls;
 }
