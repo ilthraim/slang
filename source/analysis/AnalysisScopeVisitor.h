@@ -418,7 +418,7 @@ private:
         }
 
         if (isInPackage(symbol)) {
-            if (packageCode)
+            if (packageCode && !rvalue && !lvalue)
                 addUnusedDiag(symbol, *packageCode);
             return;
         }
@@ -427,8 +427,10 @@ private:
             addUnusedDiag(symbol, unusedCode);
         else if (!rvalue && unreadCode)
             addUnusedDiag(symbol, *unreadCode);
-        else if (!lvalue && !symbol.getDeclaredType()->getInitializerSyntax() && unsetCode)
+        else if (!lvalue && !symbol.getDeclaredType()->getInitializerSyntax() && unsetCode &&
+                 symbol.getRandMode() == RandMode::None) {
             addUnusedDiag(symbol, *unsetCode);
+        }
     }
 
     template<typename TKindGetter = std::nullptr_t>
