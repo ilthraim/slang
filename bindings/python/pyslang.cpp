@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
 #include "pyslang.h"
+
 #include "slang/syntax/AllSyntax.h"
 
 void registerAnalysis(py::module_& m, py::module_& ast);
@@ -20,8 +21,12 @@ void registerSyntaxNodes0(py::module_& m);
 void registerSyntaxNodes1(py::module_& m);
 void registerSyntaxNodes2(py::module_& m);
 void registerSyntaxNodes3(py::module_& m);
-py::classh<SyntaxFactory> registerSyntax(py::module_& syntax, py::module_& parsing); // Returns the SyntaxFactory class so that it can be passed to registerSyntaxFactory
-void registerSyntaxFactory(py::classh<SyntaxFactory>& cls); // Needs to be separate so that it can be called after all syntax nodes have been registered
+py::classh<SyntaxFactory> registerSyntax(
+    py::module_& syntax, py::module_& parsing); // Returns the SyntaxFactory class so that it can be
+                                                // passed to registerSyntaxFactory
+void registerSyntaxFactory(
+    py::classh<SyntaxFactory>& cls); // Needs to be separate so that it can be called after all
+                                     // syntax nodes have been registered
 void registerTypes(py::module_& m);
 
 PYBIND11_MODULE(pyslang, m) {
@@ -49,12 +54,14 @@ PYBIND11_MODULE(pyslang, m) {
     registerUtil(m);
     registerStatements(ast);
     registerSymbols(ast);
-    auto syntaxFactoryCls = registerSyntax(syntax, parsing); // First part of two step registration of SyntaxFactory
+    auto syntaxFactoryCls =
+        registerSyntax(syntax, parsing); // First part of two step registration of SyntaxFactory
     registerSyntaxNodes0(syntax);
     registerSyntaxNodes1(syntax);
     registerSyntaxNodes2(syntax);
     registerSyntaxNodes3(syntax);
-    registerSyntaxFactory(syntaxFactoryCls); // Second part of two step registration of SyntaxFactory
+    registerSyntaxFactory(
+        syntaxFactoryCls); // Second part of two step registration of SyntaxFactory
     registerTypes(ast);
 
     py::register_exception_translator([](std::exception_ptr p) {

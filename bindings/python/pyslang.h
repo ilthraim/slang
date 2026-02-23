@@ -370,11 +370,11 @@ struct polymorphic_type_hook<T, detail::enable_if_t<std::is_base_of<SyntaxNode, 
     static const void* get(const T* src, const std::type_info*& type) {
         type = src ? typeFromSyntaxKind(src->kind) : nullptr;
         if constexpr (is_SyntaxList<T>::value || is_SeparatedSyntaxList<T>::value ||
-                      std::is_same_v<T, TokenList>) {
-            return static_cast<const SyntaxListBase*>(src);
+                      std::is_same_v<T, TokenList> || std::is_same_v<T, SyntaxListBase>) {
+            return src;
         }
         else {
-            return src;
+            return static_cast<const SyntaxNode*>(src);
         }
     }
 };

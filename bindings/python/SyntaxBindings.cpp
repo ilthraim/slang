@@ -190,7 +190,7 @@ std::shared_ptr<SyntaxTree> pySyntaxRewrite(const std::shared_ptr<SyntaxTree>& t
 
 } // end namespace
 
-// Change registerSyntax to return the SyntaxFactory class so that we can add more methods to it 
+// Change registerSyntax to return the SyntaxFactory class so that we can add more methods to it
 // without needing to re-register the entire class (two-phase registration)
 py::classh<SyntaxFactory> registerSyntax(py::module_& syntax, py::module_& parsing) {
     auto& m = syntax;
@@ -544,7 +544,8 @@ py::classh<SyntaxFactory> registerSyntax(py::module_& syntax, py::module_& parsi
         .def_static("printFile", &SyntaxPrinter::printFile, "tree"_a);
 
     // Register SyntaxFactory and return the class object for further extension later
-    auto syntaxFactoryCls = py::classh<SyntaxFactory>(m, "SyntaxFactory",
+    auto syntaxFactoryCls = py::classh<SyntaxFactory>(
+        m, "SyntaxFactory",
         "Factory for creating syntax nodes. Access via SyntaxRewriter.factory.");
 
     py::classh<PySyntaxRewriter>(m, "SyntaxRewriter")
@@ -557,8 +558,7 @@ py::classh<SyntaxFactory> registerSyntax(py::module_& syntax, py::module_& parsi
              py::arg("newNode"), py::arg("separator") = Token())
         .def("insertAtBack", &PySyntaxRewriter::py_insertAtBack, py::arg("list"),
              py::arg("newNode"), py::arg("separator") = Token())
-        .def_property_readonly("factory", &PySyntaxRewriter::getFactory,
-                               byrefint,
+        .def_property_readonly("factory", &PySyntaxRewriter::getFactory, byrefint,
                                "Get the SyntaxFactory for creating new syntax nodes")
         .def_property_readonly("alloc", &PySyntaxRewriter::getAllocator,
                                "Get the allocator for creating tokens and trivia")
