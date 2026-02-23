@@ -19,7 +19,7 @@
 #include "slang/text/SourceManager.h"
 #include "slang/util/String.h"
 
-// Forward declaration of SyntaxFactory registration so it can be referenced in methods
+// Forward declaration of SyntaxFactory registration so it can be referenced below
 extern void registerSyntaxFactory(py::classh<SyntaxFactory>& cls);
 
 namespace fs = std::filesystem;
@@ -190,6 +190,8 @@ std::shared_ptr<SyntaxTree> pySyntaxRewrite(const std::shared_ptr<SyntaxTree>& t
 
 } // end namespace
 
+// Change registerSyntax to return the SyntaxFactory class so that we can add more methods to it 
+// without needing to re-register the entire class (two-phase registration)
 py::classh<SyntaxFactory> registerSyntax(py::module_& syntax, py::module_& parsing) {
     auto& m = syntax;
     EXPOSE_ENUM(parsing, TriviaKind);
@@ -373,6 +375,7 @@ py::classh<SyntaxFactory> registerSyntax(py::module_& syntax, py::module_& parsi
             py::arg("mode") = CSTJsonMode::Full,
             "Convert this syntax node to JSON string with optional formatting mode");
 
+    // Register SyntaxListBase, SyntaxList, SeparatedSyntaxList, and TokenList for typing purposed
     py::classh<SyntaxListBase, SyntaxNode>(m, "SyntaxListBase");
 
     py::classh<SyntaxList<SyntaxNode>, SyntaxListBase>(m, "SyntaxList");
@@ -540,6 +543,7 @@ py::classh<SyntaxFactory> registerSyntax(py::module_& syntax, py::module_& parsi
         .def("str", &SyntaxPrinter::str)
         .def_static("printFile", &SyntaxPrinter::printFile, "tree"_a);
 
+    // Register SyntaxFactory and return the class object for further extension later
     auto syntaxFactoryCls = py::classh<SyntaxFactory>(m, "SyntaxFactory",
         "Factory for creating syntax nodes. Access via SyntaxRewriter.factory.");
 
