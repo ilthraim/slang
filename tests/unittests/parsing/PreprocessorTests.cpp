@@ -3040,3 +3040,70 @@ endmodule
     compilation.addSyntaxTree(SyntaxTree::fromText(text));
     NO_COMPILATION_ERRORS;
 }
+
+TEST_CASE("Macro stringify escapes are processed correctly") {
+    auto& text = R"(
+`define A(a) $error(`"`\`"a`\`"`")
+`define B(a) $error(`"\"a\"`")
+`A(foo);
+`B(foo);
+)";
+
+    auto& expected = R"(
+$error("\"foo\"");
+$error("\"a\"");
+)";
+
+    std::string result = preprocess(text);
+    CHECK(result == expected);
+    CHECK_DIAGNOSTICS_EMPTY;
+
+    auto tree = SyntaxTree::fromText(text);
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 2);
+    CHECK(diags[0].code == diag::ErrorTask);
+    CHECK(diags[1].code == diag::ErrorTask);
+}
+
+TEST_CASE("Macro with nested ifdef regress -- GH #1677") {
+    auto& text = R"(
+`define A(define, block) \
+    `ifndef define       \
+        block            \
+    `endif
+
+`define B(define, dst, src) \
+    `A(define, dst = src;)
+
+`define C(name, def) \
+    `define name``_SET(dst, src)  `B(def, dst, src)
+
+`C(P,Q)
+
+module m;
+    initial begin
+        `P_SET(a, b)
+    end
+endmodule
+)";
+
+    auto& expected = R"(
+
+module m;
+    initial begin
+
+
+
+        a = b;
+
+    end
+endmodule
+)";
+
+    std::string result = preprocess(text);
+    CHECK(result == expected);
+    CHECK_DIAGNOSTICS_EMPTY;
+}

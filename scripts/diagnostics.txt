@@ -116,7 +116,6 @@ error ExpectedIdentifier "expected identifier"
 error ExpectedStringLiteral "expected string literal"
 error ExpectedIntegerLiteral "expected integer literal"
 error ExpectedToken "expected '{}'"
-error MisplacedTrailingSeparator "misplaced trailing '{}'"
 error ImplicitNotAllowed "expected data type (implicit type name not allowed)"
 error InvalidAccessDotColon "invalid access token; '{}' should be '{}'"
 error ExpectedMember "expected member"
@@ -313,6 +312,7 @@ warning nonstandard-dist NonstandardDist "use of parentheses around 'dist' expre
 warning empty-body EmptyBody "{} has empty body (put the semicolon on a separate line to silence this warning)"
 warning split-distweight-op SplitDistWeightOp "split dist weight operator is not allowed; SystemVerilog requires that they be joined together"
 warning nested-solve-before SolveBeforeDisallowed "constraint ordering directive is not allowed within a nested constraint block"
+warning misplaced-trailing-separator MisplacedTrailingSeparator "misplaced trailing '{}'"
 note NoteToMatchThis "to match this '{}'"
 note NoteLastBlockStarted "last complete block started here"
 note NoteLastBlockEnded "and ended here"
@@ -552,7 +552,9 @@ note NoteUdpCoverage "missed desired output for rows:\n{}"
 warning explicit-static StaticInitializerMustBeExplicit "initializing a static variable in a procedural context requires an explicit 'static' keyword"
 warning case-gen-dup CaseGenerateDup "more than one case generate block matches the value {}"
 warning case-gen-none CaseGenerateNoBlock "no case generate expression matches the value {}"
-warning unconnected-port UnconnectedNamedPort "port '{}' has no connection"
+warning unconnected-input-port UnconnectedInputPort "input port '{}' has no connection"
+warning unconnected-output-port UnconnectedOutputPort "output port '{}' has no connection"
+warning unconnected-inout-port UnconnectedInOutPort "inout port '{}' has no connection"
 warning unconnected-unnamed-port UnconnectedUnnamedPort "instance does not provide a connection for an unnamed port"
 warning implicit-net-port ImplicitNetPortNoDefault "implicit net port disallowed because `default_nettype is set to 'none'"
 warning dup-attr DuplicateAttribute "duplicate attribute definition '{}'; taking last value"
@@ -894,6 +896,7 @@ error EnumValueDuplicate "redefinition of enum value {}"
 error EnumValueUnknownBits "value of {} is invalid for enum with base type {}"
 error EnumValueOutOfRange "enum value {} is out of range for base type {}"
 error EnumRangeMultiDimensional "enum range cannot be multidimensional"
+error EnumValueCountExceeded "number of enum members ({}) exceeds the maximum allowed ({})"
 error EnumCircularBaseType "enum '{}' cannot be its own base type"
 error ForwardTypedefDoesNotMatch "forward typedef basic type '{}' does not match declaration"
 error ForwardTypedefVisibility "declared visibility of forward typedef does not match the visibility of the actual type declaration"
@@ -994,6 +997,7 @@ error UnnamedGenerateReference "cannot reference unnamed generate block via exte
 warning unknown-sys-name UnknownSystemName "unknown system name '{}'"
 warning dup-import DuplicateImport "duplicate import declaration is redundant"
 warning duplicate-definition DuplicateDefinition "duplicate definition of '{}'"
+warning randomize-var-shadow RandomizeConstraintShadow "'{}' in randomize constraint block refers to class member of '{}', but a variable with the same name exists in an enclosing scope; disambiguate with 'local::{}' to reference the enclosing scope variable or 'this.{}' for the class member"
 
 subsystem SysFuncs
 error BadSystemSubroutineArg "invalid argument type {} to system {}"
@@ -1186,6 +1190,24 @@ warning unused-genvar UnusedGenvar "unused genvar '{}'"
 warning unused-assertion-decl UnusedAssertionDecl "unused {} '{}'"
 warning unused-import UnusedImport "unused import '{}'"
 warning unused-wildcard-import UnusedWildcardImport "unused wildcard import"
+warning unused-subroutine UnusedSubroutine "unused {} '{}'"
+warning unused-dpi-import UnusedDPIImport "unused DPI import '{}'"
+warning unused-package-var UnusedPackageVar "unused package variable '{}'"
+warning unused-package-typedef UnusedPackageTypedef "unused package typedef '{}'"
+warning unused-package-parameter UnusedPackageParameter "unused package parameter '{}'"
+warning unused-package-type-parameter UnusedPackageTypeParameter "unused package type parameter '{}'"
+warning unused-package-assertion-decl UnusedPackageAssertionDecl "unused package {} '{}'"
+warning unused-package-subroutine UnusedPackageSubroutine "unused package {} '{}'"
+warning unused-constructor UnusedConstructor "unused class constructor for '{}'"
+warning unused-class-method UnusedClassMethod "unused class method '{}'"
+warning unused-class-property UnusedClassProperty "unused class property '{}'"
+warning unused-but-set-property UnusedButSetProperty "class property '{}' is assigned but its value is never used"
+warning unassigned-property UnassignedProperty "class property '{}' is never assigned a value"
+warning unused-local-class-method UnusedLocalClassMethod "unused 'local' class method '{}'"
+warning unused-local-class-property UnusedLocalClassProperty "unused 'local' class property '{}'"
+warning unused-but-set-local-property UnusedButSetLocalProperty "'local' class property '{}' is assigned but its value is never used"
+warning unassigned-local-property UnassignedLocalProperty "'local' class property '{}' is never assigned a value"
+
 warning inferred-latch InferredLatch "latch inferred for '{}' because it is not assigned on all control paths"
 warning inferred-comb InferredComb "combinational logic inferred for '{}' because it is assigned on all control paths"
 warning incomplete-return IncompleteReturn "non-void function '{}' does not return a value on all control paths"
@@ -1217,7 +1239,8 @@ warning unknown-warning-option UnknownWarningOption "unknown warning option '{}'
 // Following are groups of diagnostics, to make it easy to control them from the command line.
 // The default group is the set of warnings that are enabled by default.
 
-group default = { real-underflow real-overflow vector-overflow int-overflow unconnected-port
+group default = { real-underflow real-overflow vector-overflow int-overflow unconnected-input-port
+                  unconnected-output-port unconnected-inout-port
                   unconnected-unnamed-port redef-macro unknown-pragma unknown-warning-option
                   extra-pragma-args expected-diag-arg unknown-diag-arg pragma-diag-level explicit-static
                   static-skipped elem-not-found dynarray-index dynarray-range queue-range empty-queue
@@ -1234,7 +1257,7 @@ group default = { real-underflow real-overflow vector-overflow int-overflow unco
                   dup-config-rule unused-config-cell unused-config-instance specify-condition-expr
                   seq-no-match case-too-complex nested-solve-before dynamic-non-procedural
                   nonstandard-string-concat nested-comment multi-write read-write mixed-var-assigns
-                  multiple-cont-assigns multiple-always-assigns }
+                  multiple-cont-assigns multiple-always-assigns misplaced-trailing-separator }
 
 group extra = { empty-member empty-stmt dup-import pointless-void-cast case-gen-none case-gen-dup
                 unused-result format-real ignored-slice task-ignored width-trunc dup-attr event-const
@@ -1243,7 +1266,7 @@ group extra = { empty-member empty-stmt dup-import pointless-void-cast case-gen-
                 float-narrow bitwise-rel-precedence arith-in-shift logical-not-parentheses
                 consecutive-comparison case-outside-range case-enum case-dup case-overlap
                 case-unreachable incomplete-return missing-return case-redundant-default case-incomplete
-                case-wildcard-2state inferred-latch inferred-comb }
+                case-wildcard-2state inferred-latch inferred-comb randomize-var-shadow }
 
 group pedantic = { empty-pattern implicit-net-port nonstandard-escape-code nonstandard-generate format-multibit-strength
                    nonstandard-sys-func nonstandard-foreach nonstandard-dist nonstandard-randomize isunbounded-param-arg udp-coverage }
@@ -1255,7 +1278,14 @@ group conversion = { width-trunc width-expand port-width-trunc port-width-expand
 group unused = { unused-def unused-net unused-implicit-net unused-variable undriven-net unassigned-variable
                  unused-but-set-net unused-but-set-variable unused-port undriven-port unused-argument
                  unused-parameter unused-type-parameter unused-typedef unused-genvar unused-assertion-decl
-                 unused-but-set-port unused-config-cell unused-config-instance unused-import unused-wildcard-import }
+                 unused-but-set-port unused-config-cell unused-config-instance unused-import unused-wildcard-import
+                 unused-subroutine unused-package-var unused-package-typedef unused-package-parameter
+                 unused-package-subroutine unused-class-property unused-class-method unused-constructor
+                 unused-package-type-parameter unused-package-assertion-decl unused-but-set-property
+                 unassigned-property unused-local-class-method unused-local-class-property unused-but-set-local-property
+                 unassigned-local-property unused-dpi-import }
 
 group parentheses = { bitwise-rel-precedence arith-in-shift logical-not-parentheses bitwise-op-parentheses
                       logical-op-parentheses conditional-precedence consecutive-comparison }
+
+group unconnected-port = { unconnected-input-port unconnected-output-port unconnected-inout-port }

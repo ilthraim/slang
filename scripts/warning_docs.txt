@@ -235,10 +235,32 @@ endmodule
 
 @category Port Connections
 
--Wunconnected-port
-An instance port was left unconnected and it has no default value.
+-Wunconnected-input-port
+An instance input port was left unconnected and it has no default value.
 ```
 module m(input int i);
+endmodule
+
+module n;
+    m m1();
+endmodule
+```
+
+-Wunconnected-output-port
+An instance output port was left unconnected and it has no default value.
+```
+module m(output int o);
+endmodule
+
+module n;
+    m m1();
+endmodule
+```
+
+-Wunconnected-inout-port
+An instance inout port was left unconnected.
+```
+module m(inout wire w);
 endmodule
 
 module n;
@@ -1086,6 +1108,30 @@ module m;
 endmodule
 ```
 
+-Wrandomize-var-shadow
+An identifier used inside a `randomize()` 'with' constraint block resolves to a member of
+the class being randomized, but a variable with the same name also exists in an enclosing
+scope. This is a frequent source of subtle bugs where the programmer intended to reference
+the outer variable but unintentionally references the class member instead.
+Use the `local::` prefix to explicitly reference the variable from the enclosing scope,
+or the `this.` prefix to indicate the intention to use the class member.
+```
+class A;
+    rand int x;
+    rand int y;
+endclass
+
+class B;
+    function void f();
+        A a;
+        int y = 5;
+        // 'y' below refers to A::y, not the local 'y'.
+        // Use 'local::y' to reference the local variable.
+        a.randomize() with { x == y; };
+    endfunction
+endclass
+```
+
 @category Compatibility
 
 -Wdpi-spec
@@ -1371,6 +1417,15 @@ module m;
     int i;
     always_comb i = 1;
     always_comb i = 2;
+endmodule
+```
+
+-Wmisplaced-trailing-separator
+A trailing separator (comma or semicolon) was found in a list where it is not
+allowed by the SystemVerilog standard. This is an error by default but can be
+downgraded to a warning for compatibility with tools like Yosys.
+```
+module m(input a, output b,);
 endmodule
 ```
 
@@ -1871,6 +1926,161 @@ endpackage
 module m;
     import p::*;
 endmodule
+```
+
+-Wunused-class-property
+A class property is declared but never used.
+```
+class C;
+    int i;
+endclass
+```
+
+-Wunused-but-set-property
+A class property has a value assigned but that value is never used.
+```
+class C;
+    int i;
+
+    function void foo;
+        i = 42;
+    endfunction
+endclass
+```
+
+-Wunassigned-property
+A class property is used but never has a value assigned.
+```
+class C;
+    int i;
+
+    function void foo;
+        int j = i;
+    endfunction
+endclass
+```
+
+-Wunused-local-class-property
+A 'local' (i.e. private) class property is declared but never used.
+```
+class C;
+    local int i;
+endclass
+```
+
+-Wunused-but-set-local-property
+A 'local' (i.e. private) class property has a value assigned but that value is never used.
+```
+class C;
+    local int i;
+
+    function void foo;
+        i = 42;
+    endfunction
+endclass
+```
+
+-Wunassigned-local-property
+A 'local' (i.e. private) class property is used but never has a value assigned.
+```
+class C;
+    local int i;
+
+    function void foo;
+        int j = i;
+    endfunction
+endclass
+```
+
+-Wunused-subroutine
+A task or function is declared but never called.
+```
+function foo;
+endfunction
+```
+
+-Wunused-dpi-import
+A DPI import is declared but never called.
+```
+import "DPI-C" function void dpi_func(int i);
+```
+
+-Wunused-class-method
+A class method is declared but never called.
+```
+class C;
+    function void foo;
+    endfunction
+endclass
+```
+
+-Wunused-local-class-method
+A 'local' (i.e. private) class method is declared but never called.
+```
+class C;
+    local function void foo;
+    endfunction
+endclass
+```
+
+-Wunused-constructor
+A class constructor is declared but never called.
+```
+class C;
+    function new;
+    endfunction
+endclass
+```
+
+-Wunused-package-var
+A variable declared in a package is never used.
+```
+package p;
+    int i;
+endpackage
+```
+
+-Wunused-package-typedef
+A typedef declared in a package is never used.
+```
+package p;
+    typedef int I;
+endpackage
+```
+
+-Wunused-package-parameter
+A parameter declared in a package is never used.
+```
+package p;
+    parameter p = 1;
+endpackage
+```
+
+-Wunused-package-type-parameter
+A type parameter declared in a package is never used.
+```
+package p;
+    parameter type p = int;
+endpackage
+```
+
+-Wunused-package-assertion-decl
+An assertion declaration (sequence, property, or let) declared in a package is never used.
+```
+package p;
+    sequence s;
+        1;
+    endsequence
+endpackage
+```
+
+-Wunused-package-subroutine
+A task or function declared in a package is never used.
+```
+package p;
+    function void foo;
+    endfunction
+endpackage
 ```
 
 @category Libraries and Configurations
