@@ -661,11 +661,9 @@ const std::type_info* typeFromSyntaxKind(SyntaxKind kind) {
     switch (kind) {
         case SyntaxKind::Unknown: break;
         case SyntaxKind::SyntaxList:
-            return &typeid(SyntaxList<SyntaxNode>);
         case SyntaxKind::TokenList:
-            return &typeid(TokenList);
         case SyntaxKind::SeparatedList:
-            return &typeid(SeparatedSyntaxList<SyntaxNode>);
+            return &typeid(SyntaxNode);
 """)
 
     for k, v in sorted(kindmap.items()):
