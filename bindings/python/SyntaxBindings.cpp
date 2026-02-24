@@ -373,6 +373,10 @@ py::classh<SyntaxFactory> registerSyntax(py::module_& syntax, py::module_& parsi
             py::arg("mode") = CSTJsonMode::Full,
             "Convert this syntax node to JSON string with optional formatting mode");
 
+    py::classh<SyntaxList<SyntaxNode>, SyntaxNode>(m, "SyntaxList");
+    py::classh<SeparatedSyntaxList<SyntaxNode>, SyntaxNode>(m, "SeparatedSyntaxList");
+    py::classh<TokenList, SyntaxNode>(m, "TokenList");
+
     py::classh<IncludeMetadata>(m, "IncludeMetadata")
         .def(py::init<>())
         .def_readonly("syntax", &IncludeMetadata::syntax)
