@@ -153,7 +153,7 @@ module m;
     initial if (i || r) begin end
 
     // These don't warn
-    initial if (i >> 2) begin end
+    initial if (i >>> 2) begin end
     initial if (i & 2) begin end
     initial if (i ^ 2) begin end
 endmodule
@@ -250,6 +250,108 @@ endfunction
     CHECK(diags[2].code == diag::ArithOpMismatch);
     CHECK(diags[3].code == diag::SignConversion);
     CHECK(diags[4].code == diag::SignConversion);
+}
+
+TEST_CASE("Signed logical shift warning") {
+    auto tree = SyntaxTree::fromText(R"(
+// Should warn: logical shift of signed variable
+function automatic int f1(int i);
+    return i >> 5;
+endfunction
+
+// Should NOT warn: signed but known non-negative constant
+function automatic int f2();
+    return 42 >> 1;
+endfunction
+
+// Should NOT warn: unsigned variable
+function automatic int unsigned f3(int unsigned i);
+    return i >> 5;
+endfunction
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::SignedLogicalShift);
+}
+
+TEST_CASE("Shift count overflow warning") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    logic [2:0] v;
+    int i;
+    logic [3:0] r;
+
+    initial begin
+        r = v << 4;     // warn: shift by 4 == width (4 bits)
+        r = v << 5;     // warn: shift by 5 > width
+        r = v << 3;     // ok: shift by 3 < width
+        r = v << i;     // ok: non-constant shift amount
+        r = v >> 4;     // warn: shift by 4 == width
+        r = v >> 0;     // ok: shift by 0
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 3);
+    CHECK(diags[0].code == diag::ShiftCountOverflow);
+    CHECK(diags[1].code == diag::ShiftCountOverflow);
+    CHECK(diags[2].code == diag::ShiftCountOverflow);
+}
+
+TEST_CASE("Shift count overflow warning - arithmetic shifts") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    int v;          // signed 32-bit
+    int r;
+
+    initial begin
+        r = v >>> 32;   // warn: shift by 32 == width
+        r = v >>> 31;   // ok: shift by 31 < width
+        r = v <<< 32;   // warn: shift by 32 == width
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 2);
+    CHECK(diags[0].code == diag::ShiftCountOverflow);
+    CHECK(diags[1].code == diag::ShiftCountOverflow);
+}
+
+TEST_CASE("Shift count negative warning") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    logic [7:0] v;
+    logic [7:0] r;
+    int i;
+
+    initial begin
+        r = v << -1;    // warn: negative shift amount
+        r = v >> -2;    // warn: negative shift amount
+        r = v << i;     // ok: non-constant shift amount
+        r = v << 0;     // ok: zero is valid
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 2);
+    CHECK(diags[0].code == diag::ShiftCountNegative);
+    CHECK(diags[1].code == diag::ShiftCountNegative);
 }
 
 TEST_CASE("Indeterminate variable initialization order") {
@@ -392,12 +494,13 @@ module m;
     int unsigned flags;
     logic a, b, c;
     int unsigned d, e;
+    logic [3:0] f;
     initial begin
         if (flags & 'h1 == 'h1) begin end
         if (a & b | c) begin end
         if (a | b ^ c) begin end
         if (a || b && c) begin end
-        if (a << 1 + 1) begin end
+        if ((f << 1 + 1) == 2) begin end
         if (!d < e) begin end
         if (!d & e) begin end
         if ((a + b ? 1 : 2) == 2) begin end
@@ -733,4 +836,34 @@ endmodule
     Compilation compilation;
     compilation.addSyntaxTree(tree);
     NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Increment/decrement of 1-bit operand") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    bit b;
+    logic l;
+    logic [3:0] v;
+    int i;
+
+    initial begin
+        b++;   // warn
+        ++b;   // warn
+        l--;   // warn
+        --l;   // warn
+        v++;   // ok
+        i++;   // ok
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 4);
+    CHECK(diags[0].code == diag::IncDecBit);
+    CHECK(diags[1].code == diag::IncDecBit);
+    CHECK(diags[2].code == diag::IncDecBit);
+    CHECK(diags[3].code == diag::IncDecBit);
 }

@@ -1170,8 +1170,11 @@ void Lookup::name(const NameSyntax& syntax, const ASTContext& context, bitmask<L
 
     if (!result.found) {
         if (flags.has(LookupFlags::AlwaysAllowUpward)) {
+            LookupResult originalResult = result;
             if (!lookupUpward({}, name, context, flags, result))
                 return;
+            if (!result.found)
+                result = originalResult;
         }
 
         if (!result.found && !result.hasError())
@@ -1856,6 +1859,23 @@ void Lookup::unqualifiedImpl(const Scope& scope, std::string_view name, LookupLo
                     if (symbol->as<EnumValueSymbol>().isEvaluating())
                         flags &= ~LookupFlags::AllowDeclaredAfter;
                     break;
+                case SymbolKind::Variable:
+                case SymbolKind::FormalArgument:
+                    // If we find a variable that's declared before use, then use that instead of
+                    // the one that's declared after use. We only need to do this if
+                    // AllowDeclaredAfter is enabled because if it's not, then we end up looking
+                    // up the chain anyway.
+                    if (flags.has(LookupFlags::AllowDeclaredAfter)) {
+                        LookupLocation parentLocation = LookupLocation::after(scope.asSymbol());
+                        if (parentLocation.getScope()) {
+                            unqualifiedImpl(*parentLocation.getScope(), name, parentLocation,
+                                            sourceRange, flags, outOfBlockIndex, result,
+                                            originalScope, originalSyntax);
+                            if (result.found)
+                                return;
+                        }
+                    }
+                    break;
                 default:
                     break;
             }
@@ -2359,8 +2379,7 @@ void Lookup::reportUndeclared(const Scope& initialScope, std::string_view name, 
                     if (member.name.empty() || !isViable(member))
                         continue;
 
-                    int dist = editDistance(member.name, name, /* allowReplacements */ true,
-                                            bestDistance);
+                    int dist = editDistance(member.name, name, bestDistance);
                     if (dist < bestDistance) {
                         closestSym = &member;
                         bestDistance = dist;

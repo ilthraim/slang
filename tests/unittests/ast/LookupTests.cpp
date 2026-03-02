@@ -2635,3 +2635,77 @@ endmodule
     compilation.addSyntaxTree(tree);
     NO_COMPILATION_ERRORS;
 }
+
+TEST_CASE("Pick correct variable with use before declaration over local var") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    localparam K = 4;
+
+    function automatic int f;
+        bit [K:0] width; // Should use localparam K
+        int K;
+        f = 12;
+    endfunction
+endmodule
+)");
+
+    CompilationOptions options;
+    options.flags |= CompilationFlags::AllowUseBeforeDeclare;
+
+    Compilation compilation(options);
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Pick correct variable with use before declaration over param") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    localparam K = 4;
+
+    function automatic bit[K:0] f;
+        input bit [K:0] width; // Should use localparam K
+        input int K;
+        f = 12;
+    endfunction
+endmodule
+)");
+
+    CompilationOptions options;
+    options.flags |= CompilationFlags::AllowUseBeforeDeclare;
+
+    Compilation compilation(options);
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Method lookup within parent modules") {
+    auto tree = SyntaxTree::fromText(R"(
+module top;
+    child ch();
+
+    function automatic int f;
+        return 12;
+    endfunction
+
+    task t;
+    endtask
+endmodule
+
+module child;
+    grandchild gc();
+
+    initial $display(f());
+endmodule
+
+module grandchild;
+    initial begin
+        $display(f());
+        t();
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}

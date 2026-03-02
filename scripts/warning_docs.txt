@@ -286,7 +286,7 @@ While allowed, this is easily confused with a misplaced comma and is likely
 not what you want.
 ```
 primitive p1 (output a, input b);
-    table 00:0; endtable
+    table 0:0; endtable
 endprimitive
 
 module m;
@@ -735,6 +735,22 @@ module m;
 endmodule
 ```
 
+-Wdangling-else
+A confusingly nested if/else statement lacks begin/end delimiters. The `else` clause
+could be misread as belonging to a different `if` statement than it actually does.
+Add begin/end blocks around the inner `if` statement to make the association clear.
+```
+module m(input a, b);
+    initial begin
+        if (a)
+            if (b)
+                $display("A");
+            else
+                $display("B");
+    end
+endmodule
+```
+
 -Wdup-attr
 A design element has more than one attribute of the same name.
 Only the last one will apply.
@@ -914,6 +930,52 @@ function bit[31:0] f1(int unsigned i);
 endfunction
 ```
 
+-Wsigned-logical-shift
+A logical right shift of a signed integral type shifts in zeros regardless of the sign of the
+operand, which may not be intended. If the value could be negative, consider using the arithmetic
+right shift operator `>>>` which will shift in the sign bit instead.
+```
+function automatic int f1(int i);
+    return i >> 5;
+endfunction
+```
+
+-Wshift-count-overflow
+The shift count is a constant that is greater than or equal to the bit width of the
+left-hand operand. Shifting by this amount always produces zero (for left shifts or logical
+right shifts) or all ones (for arithmetic right shifts of negative values), which is almost
+certainly not the intended behavior.
+```
+module m;
+    logic [2:0] v;
+    logic [3:0] result;
+    initial result = v << 4;
+endmodule
+```
+
+-Wshift-count-negative
+The shift count is a constant negative value. In SystemVerilog the shift amount is always
+treated as an unsigned number, so a negative shift amount is interpreted as a very large
+positive number, which will shift out all bits of the operand.
+```
+module m;
+    int v;
+    int result;
+    initial result = v << -1;
+endmodule
+```
+
+-Winc-dec-bit
+An increment or decrement operator is applied to a 1-bit operand. The result always wraps around
+and is likely not what was intended (e.g. incrementing a `bit` from 0 gives 1, but incrementing
+from 1 wraps back to 0).
+```
+module m;
+    bit b;
+    initial b++;
+endmodule
+```
+
 -Wstatic-init-value
 A static variable's initializer expression refers to an uninitialized variable, a net, a port,
 or a modport member, which won't have a value assigned by the time the initializer runs. The variable
@@ -1027,8 +1089,8 @@ endmodule
 -Wseq-no-match
 Warns about a sequence expression that can never be matched.
 ```
-module top;
-    assert property ((1'b1 ##1 1'b0) intersect (1'b1[*0] ##2 1'b1));
+module top(input clk);
+    assert property (@(posedge clk) (1'b1 ##1 1'b0) intersect (1'b1[*0] ##2 1'b1));
 endmodule
 ```
 
@@ -1104,6 +1166,45 @@ module m;
     int i, j;
     initial begin
         j = i + ++i;
+    end
+endmodule
+```
+
+-Wshadow-value
+A declaration of a value (net, variable, etc) shadows another value declaration with
+the same name in an outer scope. This can lead to subtle bugs where the programmer
+intends to reference the outer declaration but unintentionally references the
+inner (shadowing) one instead.
+```
+int unitVar;
+
+module m;
+    int x;
+    function automatic int f(int x);  // shadows m.x
+        return x;
+    endfunction
+
+    initial begin
+        int unitVar;  // shadows $unit::unitVar
+        unitVar = 1;
+    end
+endmodule
+```
+
+-Wshadow-hierarchy
+A declaration shadows another declaration with the same name in an outer scope, where either
+declaration is a named element of the hierarchy (generate block, task, function, etc).
+This can lead to subtle bugs where the programmer intends to reference the outer declaration
+but unintentionally references the inner (shadowing) one instead.
+```
+module m;
+    if (1) begin : gen
+        initial begin : gen  // shadows m.gen
+        end
+
+        initial begin
+            int gen;  // shadows m.gen.gen
+        end
     end
 endmodule
 ```
@@ -1426,6 +1527,34 @@ allowed by the SystemVerilog standard. This is an error by default but can be
 downgraded to a warning for compatibility with tools like Yosys.
 ```
 module m(input a, output b,);
+endmodule
+```
+
+-Wqualifiers-on-out-of-block
+Out-of-block method definitions are not allowed to include qualifiers (such as the `static` keyword).
+This is an error by default but can be downgraded to a warning for compatibility with tools.
+```
+module memMod();
+    class C;
+        extern static function int f();
+    endclass
+
+    static function int C::f();
+      f = 10;
+    endfunction
+endmodule
+```
+
+-Wmember-impl-not-found
+A class has the declaration for a member method, but the implementation of that member method is not
+found either in the class or as an out of body definition.
+This is an error by default but can be downgraded to a warning for compatibility with tools.
+```
+module m;
+class c;
+   extern function int f();
+endclass
+
 endmodule
 ```
 
@@ -2093,6 +2222,9 @@ config cfg;
     design d;
     default liblist foo;
 endconfig
+
+module d;
+endmodule
 ```
 
 -Wdup-config-rule

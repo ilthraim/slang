@@ -831,7 +831,37 @@ class E;
         void'(d.randomize());
         d.body();
     endtask
+
+    function void pre_randomize();
+    endfunction
+
+    function void post_randomize();
+    endfunction
 endclass
+
+class C1;
+    int a;
+
+    (*unused*) function void f();
+        if (a == 3) begin
+        end
+    endfunction
+endclass
+
+class C2;
+    C1 c1;
+endclass
+
+module top;
+    C1 c1;
+    C2 c2;
+    initial begin
+        c1 = new();
+        c2 = new();
+        c2.c1 = c1;
+        c2.c1.a = 3;
+    end
+endmodule
 )";
 
     Compilation compilation;
@@ -843,4 +873,96 @@ endclass
     CHECK(diags[3].code == diag::UnusedLocalClassProperty);
     CHECK(diags[4].code == diag::UnusedButSetLocalProperty);
     CHECK(diags[5].code == diag::UnassignedLocalProperty);
+}
+
+// Helper that runs analysis with only the CheckShadow flag enabled.
+static Diagnostics analyzeShadow(const std::string& text, Compilation& compilation) {
+    AnalysisOptions options;
+    options.flags = AnalysisFlags::CheckShadow;
+
+    AnalysisManager manager(options);
+    return analyze(text, compilation, manager);
+}
+
+TEST_CASE("Shadowing warnings") {
+    auto& text = R"(
+class C;
+endclass
+
+typedef int Foo;
+
+module m;
+    int x;
+    initial begin
+        int x;  // shadows outer x
+        x = 1;
+    end
+
+    initial begin
+        int C;
+    end
+
+    function void Foo(real x);
+    endfunction
+
+    int m;
+endmodule
+)";
+
+    Compilation compilation;
+    auto diags = analyzeShadow(text, compilation);
+    REQUIRE(diags.size() == 4);
+    CHECK(diags[0].code == diag::ShadowValue);
+    CHECK(diags[1].code == diag::ShadowHierarchy);
+    CHECK(diags[2].code == diag::ShadowHierarchy);
+    CHECK(diags[3].code == diag::ShadowValue);
+}
+
+TEST_CASE("Shadowing false positives") {
+    auto& text = R"(
+interface intf;
+    logic clk;
+    logic a;
+
+    clocking cb @(posedge clk);
+        default input #1step;
+        input a;
+    endclocking
+endinterface
+
+module top;
+    for (genvar i = 0; i < 4; i++) begin: gen_1
+    end
+
+    intf inst();
+endmodule
+
+module top2;
+    localparam bit A = 1'b1;
+    localparam bit B = 1'b1;
+
+    if (A) begin
+        if (B) begin
+            always_comb begin
+            end
+        end
+    end
+
+endmodule
+
+class C;
+    rand int a;
+    rand int b;
+
+    covergroup CG;
+        cp_a: coverpoint a;
+        cp_b: coverpoint b;
+        cx_ab: cross cp_a, cp_b;
+    endgroup
+endclass
+)";
+
+    Compilation compilation;
+    auto diags = analyzeShadow(text, compilation);
+    CHECK_DIAGS_EMPTY;
 }
