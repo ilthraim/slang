@@ -663,7 +663,7 @@ const std::type_info* typeFromSyntaxKind(SyntaxKind kind) {
         case SyntaxKind::SyntaxList:
         case SyntaxKind::TokenList:
         case SyntaxKind::SeparatedList:
-            return &typeid(SyntaxNode);
+            return &typeid(SyntaxListBase);
 """)
 
     for k, v in sorted(kindmap.items()):
