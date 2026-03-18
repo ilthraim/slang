@@ -798,7 +798,8 @@ bar
 )";
     auto& expected = R"(
 asdfllkj
-foobar
+foo
+bar
 )";
 
     std::string result = preprocess(text);
@@ -2588,6 +2589,51 @@ TEST9
     CHECK_DIAGNOSTICS_EMPTY;
 }
 
+TEST_CASE("Conditional ifdef expression precedence") {
+    auto& text = R"(
+`define A
+`define B
+
+`ifdef (C && A || B)
+PREC1
+`endif
+`ifdef (A || C && B)
+PREC2
+`endif
+`ifdef (A && B || C && B)
+PREC3
+`endif
+)";
+
+    auto& expected = R"(
+PREC1
+PREC2
+PREC3
+)";
+
+    std::string result = preprocess(text, optionsFor(LanguageVersion::v1800_2023));
+    CHECK(result == expected);
+    CHECK_DIAGNOSTICS_EMPTY;
+}
+
+TEST_CASE("Conditional ifdef expression right-associativity") {
+    auto& text = R"(
+`define A
+
+`ifdef (!A -> A -> B)
+RIGHTASSOC1
+`endif
+)";
+
+    auto& expected = R"(
+RIGHTASSOC1
+)";
+
+    std::string result = preprocess(text, optionsFor(LanguageVersion::v1800_2023));
+    CHECK(result == expected);
+    CHECK_DIAGNOSTICS_EMPTY;
+}
+
 TEST_CASE("Conditional ifdef expression errors") {
     auto& text = R"(
 `define A 0
@@ -2953,6 +2999,89 @@ endmodule
     NO_COMPILATION_ERRORS;
 }
 
+TEST_CASE("Preprocessor: Include inside macro with nested include in included file") {
+    // Regression test: when a macro body contains `include "X", and X itself
+    // contains another `include "Y", the paused macro expansion must not resume
+    // until X is fully processed — not when Y (a nested include inside X) finishes.
+    //
+    // Buggy behaviour: the macro remainder ("module test; ...") was inserted into
+    // the token stream as soon as Y finished, before X's closing tokens
+    // ("endfunction / endclass / endpackage") were emitted.
+    getSourceManager().assignText("macro_nested_body.svh", R"(
+`ifndef _macro_nested_body_svh
+`define _macro_nested_body_svh
+
+`endif
+)");
+
+    getSourceManager().assignText("macro_nested_pkg.sv", R"(
+`ifndef _macro_nested_pkg_sv
+`define _macro_nested_pkg_sv
+
+package pkg;
+    timeunit 1ps; timeprecision 1ps;
+    class c;
+        virtual function void f1();
+            `include "macro_nested_body.svh"
+        endfunction
+    endclass
+endpackage
+
+`endif
+)");
+
+    getSourceManager().assignText("macro_nested_defines.svh", R"(
+`ifndef _macro_nested_defines_svh
+`define _macro_nested_defines_svh
+
+`define TEST_HEADER(TEST_NAME) \
+`include "macro_nested_pkg.sv" \
+module TEST_NAME; \
+timeunit 1ps; timeprecision 1ps; \
+    class mytest;
+
+`endif
+)");
+
+    auto& text = R"(
+`include "macro_nested_defines.svh"
+`TEST_HEADER(mytest)
+        virtual task test_body();
+        endtask
+    endclass
+endmodule
+)";
+
+    auto& expected = R"(
+package pkg;
+    timeunit 1ps; timeprecision 1ps;
+    class c;
+        virtual function void f1();
+
+        endfunction
+    endclass
+endpackage
+
+module mytest;
+timeunit 1ps; timeprecision 1ps;
+    class mytest;
+        virtual task test_body();
+        endtask
+    endclass
+endmodule
+)";
+
+    std::string result = preprocess(text);
+    result.erase(std::remove(result.begin(), result.end(), '\r'), result.end());
+    CHECK(result == expected);
+
+    // The design should also compile cleanly.
+    auto tree = SyntaxTree::fromText(text, getSourceManager());
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
 TEST_CASE("Preprocessor: non-trivial restore of begin_keywords vs mapped option") {
     getSourceManager().assignText("inc2.svh", R"(
 config cfg;
@@ -3104,6 +3233,220 @@ endmodule
 )";
 
     std::string result = preprocess(text);
+    CHECK(result == expected);
+    CHECK_DIAGNOSTICS_EMPTY;
+}
+
+TEST_CASE("Nested macro with multiline arg") {
+    auto& text = R"(
+`define MACRO_PARENT(code) \
+  `define MACRO_FOOBAR 1 \
+  code
+
+`define MACRO_CHILD reg r;
+
+module top;
+`MACRO_PARENT(
+  logic foobar;
+  `MACRO_CHILD
+);
+endmodule
+)";
+
+    auto& expected = R"(
+module top;
+
+  logic foobar;
+  reg r;;
+endmodule
+)";
+
+    std::string result = preprocess(text);
+    CHECK(result == expected);
+    CHECK_DIAGNOSTICS_EMPTY;
+}
+
+TEST_CASE("Header guard -- matching macro names (no warning)") {
+    auto& text = R"(
+`ifndef MY_HEADER_H
+`define MY_HEADER_H
+
+module m;
+endmodule
+
+`endif
+)";
+    preprocess(text);
+    CHECK_DIAGNOSTICS_EMPTY;
+}
+
+TEST_CASE("Header guard -- mismatched macro names") {
+    auto& text = R"(
+`ifndef MY_HEADER_H
+`define MY_OTHER_HEADER_H
+
+module m;
+endmodule
+
+`endif
+)";
+    preprocess(text);
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::HeaderGuardMismatch);
+}
+
+TEST_CASE("Header guard -- mismatched in included file") {
+    getSourceManager().assignText("hdr.svh", "`ifndef HDR_SVH\n"
+                                             "`define HDR_SVH_TYPO\n"
+                                             "`endif\n");
+    auto& text = R"(`include "hdr.svh")";
+    preprocess(text);
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::HeaderGuardMismatch);
+}
+
+TEST_CASE("Header guard -- ifdef does not trigger check") {
+    // `ifdef (not `ifndef) should not activate the header guard check.
+    auto& text = R"(
+`ifdef MY_HEADER_H
+`define MY_OTHER_HEADER_H
+`endif
+)";
+    preprocess(text);
+    CHECK_DIAGNOSTICS_EMPTY;
+}
+
+TEST_CASE("Header guard -- inner ifndef mismatch does not warn") {
+    // Only the outermost `ifndef is checked. Inner mismatches are not reported.
+    auto& text = R"(
+`ifndef OUTER_H
+`define OUTER_H
+
+`ifndef INNER_H
+`define INNER_WRONG_H
+`endif
+
+`endif
+)";
+    preprocess(text);
+    CHECK_DIAGNOSTICS_EMPTY;
+}
+
+TEST_CASE("Header guard -- outer mismatch with nested content warns") {
+    auto& text = R"(
+`ifndef OUTER_H
+`define OUTER_WRONG_H
+
+`ifndef INNER_H
+`define INNER_H
+`endif
+
+`endif
+)";
+    preprocess(text);
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::HeaderGuardMismatch);
+}
+
+TEST_CASE("Header guard -- other directive between ifndef and define cancels") {
+    auto& text = R"(
+`ifndef FOO_H
+`timescale 1ns/1ps
+`define BAR_H
+`endif
+)";
+    preprocess(text);
+    CHECK_DIAGNOSTICS_EMPTY;
+}
+
+TEST_CASE("Header guard -- real token before ifndef cancels") {
+    auto& text = R"(
+module m; endmodule
+`ifndef FOO_H
+`define BAR_H
+`endif
+)";
+    preprocess(text);
+    CHECK_DIAGNOSTICS_EMPTY;
+}
+
+TEST_CASE("Header guard -- trailing content after endif cancels") {
+    auto& text = R"(
+`ifndef FOO_H
+`define BAR_H
+`endif
+module m; endmodule
+)";
+    preprocess(text);
+    CHECK_DIAGNOSTICS_EMPTY;
+}
+
+TEST_CASE("Header guard -- directive after endif cancels") {
+    auto& text = R"(
+`ifndef FOO_H
+`define BAR_H
+`endif
+`timescale 1ns/1ps
+)";
+    preprocess(text);
+    CHECK_DIAGNOSTICS_EMPTY;
+}
+
+TEST_CASE("Header guard -- undef guard macro allows re-include") {
+    // After `undef-ing the header guard macro the file should be re-included
+    // on the next `include, and macros defined inside it should be visible again.
+    getSourceManager().assignText("defines.svh", "`ifndef _DEFINES_H\n"
+                                                 "`define _DEFINES_H\n"
+                                                 "`define FOOBAR 1\n"
+                                                 "`endif\n");
+    auto& text = R"(
+`include "defines.svh"
+`undef FOOBAR
+`undef _DEFINES_H
+`include "defines.svh"
+`FOOBAR
+)";
+    auto& expected = R"(
+1
+)";
+
+    std::string result = preprocess(text);
+    result.erase(std::remove(result.begin(), result.end(), '\r'), result.end());
+    CHECK(result == expected);
+    CHECK_DIAGNOSTICS_EMPTY;
+}
+
+TEST_CASE("Macro with trailing space after line continuation") {
+    // We concatenate 2 raw strings to avoid the C++ compiler warning about trailing space
+    std::string text1 = R"(
+module top;
+`define TOP_MACRO \
+  bit a, b;\ )";
+    std::string text2 = R"(
+  initial begin\
+     a = b + 1;\
+     $finish;\
+  end
+`TOP_MACRO
+endmodule
+)";
+
+    auto& expected = R"(
+module top;
+  bit a, b;
+  initial begin
+     a = b + 1;
+     $finish;
+  end
+endmodule
+)";
+
+    LexerOptions lo;
+    lo.allowMacroTrailingSpace = true;
+
+    CHECK(text1[text1.size() - 2] == '\\');
+    CHECK(text1[text1.size() - 1] == ' ');
+    std::string result = preprocess(text1 + text2, lo);
     CHECK(result == expected);
     CHECK_DIAGNOSTICS_EMPTY;
 }

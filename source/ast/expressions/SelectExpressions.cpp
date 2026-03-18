@@ -10,6 +10,7 @@
 #include "slang/ast/ASTSerializer.h"
 #include "slang/ast/Compilation.h"
 #include "slang/ast/EvalContext.h"
+#include "slang/ast/Lookup.h"
 #include "slang/ast/TypeProvider.h"
 #include "slang/ast/expressions/CallExpression.h"
 #include "slang/ast/expressions/LiteralExpressions.h"
@@ -863,7 +864,7 @@ Expression& MemberAccessExpression::fromSelector(
     Compilation& comp, Expression& expr, const LookupResult::MemberSelector& selector,
     const InvocationExpressionSyntax* invocation,
     const ArrayOrRandomizeMethodExpressionSyntax* withClause, const ASTContext& context,
-    bool isFromLookupChain) {
+    bool isFromLookupChain, bool isDottedAccess) {
 
     // If the selector name is invalid just give up early.
     if (selector.name.empty())
@@ -982,6 +983,7 @@ Expression& MemberAccessExpression::fromSelector(
         diag << expr.sourceRange;
         diag << selector.name;
         diag << *expr.type;
+        Lookup::addTypoCorrectionNote(diag, selector.name, *scope);
         return badExpr(comp, &expr);
     }
 
@@ -1001,12 +1003,7 @@ Expression& MemberAccessExpression::fromSelector(
             }
 
             // We need to note the reference to the property here.
-            if (auto syntax = member->getSyntax()) {
-                const bool isLValue = context.flags.has(ASTFlags::LValue);
-                comp.noteReference(*syntax, isLValue);
-                if (isLValue && context.flags.has(ASTFlags::LAndRValue))
-                    comp.noteReference(*syntax, /* isLValue */ false);
-            }
+            context.noteReference(prop, isDottedAccess);
 
             return *comp.emplace<MemberAccessExpression>(prop.getType(), expr, prop, range);
         }
@@ -1065,7 +1062,7 @@ Expression& MemberAccessExpression::fromSyntax(
     selector.nameRange = syntax.name.range();
 
     auto& result = fromSelector(compilation, lhs, selector, invocation, withClause, context,
-                                /* isFromLookupChain */ false);
+                                /* isFromLookupChain */ false, /* isDottedAccess */ false);
 
     if (result.kind != ExpressionKind::Call && !result.bad()) {
         if (invocation) {

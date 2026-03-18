@@ -195,6 +195,7 @@ private:
     syntax::SelectorSyntax* parseElementSelector();
     syntax::NameSyntax& parseName(bitmask<NameOptions> options);
     syntax::NameSyntax& parseNamePart(bitmask<NameOptions> options);
+    syntax::ExpressionSyntax& parseForeachArrayExpression();
     syntax::ParameterValueAssignmentSyntax* parseParameterValueAssignment();
     syntax::ArgumentListSyntax& parseArgumentList();
     syntax::ParamAssignmentSyntax& parseParamValue();
@@ -232,7 +233,7 @@ private:
     syntax::ConcurrentAssertionStatementSyntax& parseConcurrentAssertion(syntax::NamedLabelSyntax* label, AttrList attributes);
     syntax::PropertySpecSyntax& parsePropertySpec();
     syntax::ActionBlockSyntax& parseActionBlock();
-    syntax::BlockStatementSyntax& parseBlock(syntax::SyntaxKind blockKind, TokenKind endKind, syntax::NamedLabelSyntax* label, AttrList attributes);
+    syntax::BlockStatementSyntax& parseBlock(syntax::SyntaxKind blockKind, TokenKind endKind, syntax::NamedLabelSyntax* label, AttrList attributes, bool inConstructor = false);
     syntax::StatementSyntax& parseWaitStatement(syntax::NamedLabelSyntax* label, AttrList attributes);
     syntax::WaitOrderStatementSyntax& parseWaitOrderStatement(syntax::NamedLabelSyntax* label, AttrList attributes);
     syntax::RandCaseStatementSyntax& parseRandCaseStatement(syntax::NamedLabelSyntax* label, AttrList attributes);
@@ -247,6 +248,7 @@ private:
     AttrList parseAttributes();
     syntax::AttributeSpecSyntax& parseAttributeSpec();
     syntax::MemberSyntax* parseMember(syntax::SyntaxKind parentKind, bool& anyLocalModules);
+    syntax::MemberSyntax* parseMemberImpl(AttrList attributes, syntax::SyntaxKind parentKind, bool& anyLocalModules);
     syntax::ModuleHeaderSyntax& parseModuleHeader();
     syntax::ParameterPortListSyntax* parseParameterPortList();
     syntax::MemberSyntax& parseModule(AttrList attributes, syntax::SyntaxKind parentKind, bool& anyLocalModules);
@@ -465,6 +467,10 @@ private:
     // Report warnings for misleading empty loop / conditional bodies.
     void checkEmptyBody(const syntax::SyntaxNode& syntax, Token prevToken,
                         std::string_view syntaxName);
+
+    // Report warnings when a statement following a single-statement loop/conditional
+    // is indented at the same level as the body, making it look like it's part of the construct.
+    void checkMisleadingIndentation(const syntax::SyntaxNode& prevStmt, Token nextToken);
 
     // ---- Member variables ----
 

@@ -57,7 +57,7 @@ Diagnostic& LookupResult::addDiag(const Scope& scope, DiagCode code, SourceRange
 
 bool LookupResult::hasError() const {
     // We have an error if we have any diagnostics or if there was a missing explicit import.
-    if (!found && flags.has(LookupResultFlags::WasImported | LookupResultFlags::SuppressUndeclared))
+    if (!found && flags.has(LookupResultFlags::WasImported))
         return true;
 
     for (auto& diag : diagnostics) {
@@ -275,6 +275,28 @@ void applySelectors(const NameComponents& name, const ASTContext& context, Looku
             result.nameRange = {result.nameRange.start(), name.range.end()};
         }
     }
+}
+
+// Searches the given scope for a symbol whose name is close to @a name.
+// Returns the closest match if within the typo-correction threshold, or nullptr.
+const Symbol* findCloseMatch(std::string_view name, const Scope& scope) {
+    const Symbol* closest = nullptr;
+    int bestDistance = INT_MAX;
+    for (auto& member : scope.members()) {
+        if (member.name.empty())
+            continue;
+
+        int dist = editDistance(member.name, name, bestDistance);
+        if (dist < bestDistance) {
+            closest = &member;
+            bestDistance = dist;
+        }
+    }
+
+    if (closest && bestDistance > 0 && name.length() / size_t(bestDistance) >= 3)
+        return closest;
+
+    return nullptr;
 }
 
 // Returns true if the lookup was ok, or if it failed in a way that allows us to continue
@@ -533,6 +555,7 @@ bool lookupDownward(std::span<const NamePlusLoc> nameParts, NameComponents name,
                                                 it->dotLocation);
                     diag << name.text;
                     diag << name.range;
+                    Lookup::addTypoCorrectionNote(diag, name.text, scope);
                 }
                 return true;
             }
@@ -875,15 +898,24 @@ bool resolveColonNames(SmallVectorBase<NamePlusLoc>& nameParts, int colonParts,
 
         if (!symbol) {
             DiagCode code = diag::UnknownClassMember;
-            if (savedSymbol->kind == SymbolKind::Package)
+            const Scope* searchScope;
+            if (savedSymbol->kind == SymbolKind::Package) {
                 code = diag::UnknownPackageMember;
-            else if (savedSymbol->kind == SymbolKind::CovergroupType)
+                searchScope = &savedSymbol->as<Scope>();
+            }
+            else if (savedSymbol->kind == SymbolKind::CovergroupType) {
                 code = diag::UnknownCovergroupMember;
+                searchScope = &savedSymbol->as<CovergroupType>().getBody();
+            }
+            else {
+                searchScope = &savedSymbol->as<Scope>();
+            }
 
             auto& diag = result.addDiag(*context.scope, code, part.dotLocation);
             diag << name.text;
             diag << name.range;
             diag << savedSymbol->name;
+            Lookup::addTypoCorrectionNote(diag, name.text, *searchScope);
             return false;
         }
 
@@ -1170,8 +1202,12 @@ void Lookup::name(const NameSyntax& syntax, const ASTContext& context, bitmask<L
 
     if (!result.found) {
         if (flags.has(LookupFlags::AlwaysAllowUpward)) {
+            LookupResult originalResult = result;
             if (!lookupUpward({}, name, context, flags, result))
                 return;
+
+            if (!result.found)
+                result = originalResult;
         }
 
         if (!result.found && !result.hasError())
@@ -1196,6 +1232,9 @@ void Lookup::name(const NameSyntax& syntax, const ASTContext& context, bitmask<L
     applySelectors(name, context, result);
     if (flags.has(LookupFlags::NoSelectors))
         result.errorIfSelectors(context);
+
+    if (result.found && result.upwardCount > 0)
+        result.addDiag(scope, diag::UpwardHierarchicalName, name.range) << name.text;
 }
 
 const Symbol* Lookup::unqualified(const Scope& scope, std::string_view name,
@@ -1435,6 +1474,7 @@ void Lookup::selectChild(const Type& virtualInterface, SourceRange range,
         }
     }
 
+    result.nameRange = range;
     result.found = getVirtualInterfaceTarget(virtualInterface, context, range);
     lookupDownward(nameParts, unused, context, LookupFlags::None, result);
 }
@@ -1856,6 +1896,23 @@ void Lookup::unqualifiedImpl(const Scope& scope, std::string_view name, LookupLo
                     if (symbol->as<EnumValueSymbol>().isEvaluating())
                         flags &= ~LookupFlags::AllowDeclaredAfter;
                     break;
+                case SymbolKind::Variable:
+                case SymbolKind::FormalArgument:
+                    // If we find a variable that's declared before use, then use that instead of
+                    // the one that's declared after use. We only need to do this if
+                    // AllowDeclaredAfter is enabled because if it's not, then we end up looking
+                    // up the chain anyway.
+                    if (flags.has(LookupFlags::AllowDeclaredAfter)) {
+                        LookupLocation parentLocation = LookupLocation::after(scope.asSymbol());
+                        if (parentLocation.getScope()) {
+                            unqualifiedImpl(*parentLocation.getScope(), name, parentLocation,
+                                            sourceRange, flags, outOfBlockIndex, result,
+                                            originalScope, originalSyntax);
+                            if (result.found)
+                                return;
+                        }
+                    }
+                    break;
                 default:
                     break;
             }
@@ -2250,8 +2307,11 @@ void Lookup::qualified(const ScopedNameSyntax& syntax, const ASTContext& context
     if (!lookupUpward(nameParts, first, context, flags, result))
         return;
 
-    if (result.found)
+    if (result.found) {
+        if (result.upwardCount > 0)
+            result.addDiag(scope, diag::UpwardHierarchicalName, first.range) << first.text;
         return;
+    }
 
     // We couldn't find anything. originalResult has any diagnostics issued by the first
     // downward lookup (if any), so it's fine to just return it as is. If we never found any
@@ -2359,8 +2419,7 @@ void Lookup::reportUndeclared(const Scope& initialScope, std::string_view name, 
                     if (member.name.empty() || !isViable(member))
                         continue;
 
-                    int dist = editDistance(member.name, name, /* allowReplacements */ true,
-                                            bestDistance);
+                    int dist = editDistance(member.name, name, bestDistance);
                     if (dist < bestDistance) {
                         closestSym = &member;
                         bestDistance = dist;
@@ -2432,6 +2491,15 @@ void Lookup::reportUndeclared(const Scope& initialScope, std::string_view name, 
 
     // We couldn't make any sense of this, just report a simple error about a missing identifier.
     result.addDiag(initialScope, diag::UndeclaredIdentifier, range) << name;
+}
+
+void Lookup::addTypoCorrectionNote(Diagnostic& diag, std::string_view name, const Scope& scope) {
+    auto& comp = scope.getCompilation();
+    if (comp.doTypoCorrection()) {
+        comp.didTypoCorrection();
+        if (auto closest = findCloseMatch(name, scope))
+            diag.addNote(diag::NoteDidYouMean, closest->location) << closest->name;
+    }
 }
 
 } // namespace slang::ast

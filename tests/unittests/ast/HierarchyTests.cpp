@@ -72,6 +72,33 @@ endmodule
     CHECK(diags[0].code == diag::DuplicateDefinition);
 }
 
+TEST_CASE("Duplicate module as auto-top -- only one instance created") {
+    // Regression test: when duplicate module definitions both qualify as valid top
+    // modules, only one top-level instance should be created (not one per definition).
+    auto tree = SyntaxTree::fromText(R"(
+module foo;
+endmodule
+
+module foo;
+endmodule
+
+module bar;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::DuplicateDefinition);
+
+    auto& root = compilation.getRoot();
+    REQUIRE(root.topInstances.size() == 2);
+    CHECK(root.topInstances[0]->name == "bar");
+    CHECK(root.topInstances[1]->name == "foo");
+}
+
 TEST_CASE("Duplicate package") {
     auto tree = SyntaxTree::fromText(R"(
 package pack;
@@ -862,7 +889,7 @@ endmodule
     Compilation compilation;
     compilation.addSyntaxTree(tree);
 
-    auto& diags = compilation.getAllDiagnostics();
+    auto diags = compilation.getAllDiagnostics().filter(DefaultIgnoreWarnings);
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::WidthTruncate);
 }
@@ -934,7 +961,7 @@ endmodule
     Compilation compilation(options);
     compilation.addSyntaxTree(tree);
 
-    auto& diags = compilation.getAllDiagnostics();
+    auto diags = compilation.getAllDiagnostics().filter(DefaultIgnoreWarnings);
     REQUIRE(diags.size() == 2);
     CHECK(diags[0].code == diag::ConstEvalParamCycle);
     CHECK(diags[1].code == diag::ConstEvalParamCycle);
@@ -1083,7 +1110,7 @@ endmodule
     Compilation compilation;
     compilation.addSyntaxTree(tree);
 
-    auto& diags = compilation.getAllDiagnostics();
+    auto diags = compilation.getAllDiagnostics().filter(DefaultIgnoreWarnings);
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::IllegalReferenceToProgramItem);
 }
@@ -1136,7 +1163,7 @@ endmodule
     Compilation compilation;
     compilation.addSyntaxTree(tree);
 
-    auto& diags = compilation.getAllDiagnostics();
+    auto diags = compilation.getAllDiagnostics().filter(DefaultIgnoreWarnings);
     REQUIRE(diags.size() == 7);
     CHECK(diags[0].code == diag::NotAllowedInAnonymousProgram);
     CHECK(diags[1].code == diag::Redefinition);
@@ -1420,7 +1447,7 @@ endmodule
     Compilation compilation;
     compilation.addSyntaxTree(tree);
 
-    auto& diags = compilation.getAllDiagnostics();
+    auto diags = compilation.getAllDiagnostics().filter(DefaultIgnoreWarnings);
     REQUIRE(diags.size() == 2);
     CHECK(diags[0].code == diag::InfoTask);
     CHECK(diags[1].code == diag::InfoTask);

@@ -68,7 +68,7 @@ public:
     }
 };
 
-struct MonitorVisitor : public ASTVisitor<MonitorVisitor, true, true> {
+struct MonitorVisitor : public ASTVisitor<MonitorVisitor, VisitFlags::AllGood> {
     const ASTContext& context;
 
     MonitorVisitor(const ASTContext& context) : context(context) {}
@@ -177,7 +177,7 @@ public:
         // equivalently, a task, nothing will inspect the result, but we only want it to not
         // abort further evaluation for errors / fatals.
         if (taskKind == ElabSystemTaskKind::Info || taskKind == ElabSystemTaskKind::Warning)
-            return ConstantValue::NullPlaceholder{};
+            return NullConstant;
         return nullptr;
     }
 
@@ -586,6 +586,52 @@ public:
         if (!checkArgCount(context, false, args, range, 2, 2))
             return comp.getErrorType();
 
+        // Warn when the result of $cast is statically deterministic.
+        auto& destType = *args[0]->type;
+        auto& srcType = *args[1]->type;
+
+        auto reportWarning = [&](bool succeed) {
+            auto& diag = context.addDiag(diag::DynamicCastConst, range) << srcType << destType;
+            diag << (succeed ? "succeed"sv : "fail"sv);
+        };
+
+        if (!destType.isError() && !srcType.isError()) {
+            if (!destType.isClass()) {
+                // For non-class types the LRM says:
+                // The assignment is invalid if the arguments are singular and not cast compatible
+                // or the arguments are not singular and not assignment compatible.
+                //
+                // There's also an exeptional case for enums -- integer to enum casts check whether
+                // the value is actually one of the enum members.
+                if (destType.isEnum() && srcType.isIntegral()) {
+                    if (auto cv = context.tryEval(*args[1]); cv && cv.isInteger()) {
+                        auto&& values = destType.getCanonicalType()
+                                            .as<EnumType>()
+                                            .membersOfType<EnumValueSymbol>();
+                        reportWarning(std::ranges::any_of(values, [&cv](const EnumValueSymbol& ev) {
+                            return ev.getValue() == cv;
+                        }));
+                    }
+                }
+                else if (destType.isSingular() && srcType.isSingular()) {
+                    reportWarning(destType.isCastCompatible(srcType));
+                }
+                else {
+                    reportWarning(destType.isAssignmentCompatible(srcType));
+                }
+            }
+            else if (destType.isAssignmentCompatible(srcType)) {
+                // Source is already statically a subtype of (or equal to) the destination,
+                // so the cast always succeeds.
+                reportWarning(true);
+            }
+            else if (srcType.isClass() && !srcType.isAssignmentCompatible(destType)) {
+                // Both types are class types and neither is in the other's hierarchy, so no
+                // object whose static type is srcType can ever satisfy the cast to destType.
+                reportWarning(false);
+            }
+        }
+
         return comp.getIntType();
     }
 };
@@ -884,6 +930,33 @@ public:
     }
 };
 
+class DepositTask : public SystemTaskBase {
+public:
+    DepositTask() : SystemTaskBase(KnownSystemName::Deposit) { hasOutputArgs = true; }
+
+    const Expression& bindArgument(size_t argIndex, const ASTContext& context,
+                                   const ExpressionSyntax& syntax, const Args& args) const final {
+        if (argIndex == 0)
+            return Expression::bindLValue(syntax, context);
+
+        if (argIndex == 1 && !args.empty()) {
+            return Expression::bindArgument(*args[0]->type, ArgumentDirection::In, {}, syntax,
+                                            context);
+        }
+
+        return SystemTaskBase::bindArgument(argIndex, context, syntax, args);
+    }
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression*) const final {
+        auto& comp = context.getCompilation();
+        if (!checkArgCount(context, false, args, range, 2, 2))
+            return comp.getErrorType();
+
+        return comp.getVoidType();
+    }
+};
+
 void Builtins::registerSystemTasks() {
     using parsing::KnownSystemName;
 
@@ -965,6 +1038,7 @@ void Builtins::registerSystemTasks() {
     addSystemSubroutine(std::make_shared<FatalTask>());
     addSystemSubroutine(std::make_shared<ScopeTask>(KnownSystemName::List, true));
     addSystemSubroutine(std::make_shared<ScopeTask>(KnownSystemName::Scope, false));
+    addSystemSubroutine(std::make_shared<DepositTask>());
 
 #define TASK(name, required, ...)                                                    \
     addSystemSubroutine(std::make_shared<SimpleSystemTask>(name, voidType, required, \

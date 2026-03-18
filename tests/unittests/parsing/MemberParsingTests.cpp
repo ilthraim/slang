@@ -181,6 +181,22 @@ endfunction : new
     CHECK_DIAGNOSTICS_EMPTY;
 }
 
+TEST_CASE("Extern/Pure implicit function parsing") {
+    auto& text = R"(
+module memMod();
+    class C;
+        extern static function f();
+    endclass
+
+    function C::f();
+    endfunction
+endmodule
+)";
+
+    parseCompilationUnit(text);
+    CHECK_DIAGNOSTICS_EMPTY;
+}
+
 TEST_CASE("Property declarations") {
     auto& text = R"(
 property p3;
@@ -499,6 +515,49 @@ endclass
     REQUIRE(diagnostics.size() == 2);
     CHECK(diagnostics[0].code == diag::InvalidSuperNew);
     CHECK(diagnostics[1].code == diag::InvalidSuperNew);
+}
+
+TEST_CASE("super.new inside begin/end block -- valid") {
+    auto& text = R"(
+class A;
+    function new;
+    endfunction
+endclass
+
+class B extends A;
+    function new;
+        begin
+            super.new();
+        end
+    endfunction
+endclass
+)";
+
+    parseCompilationUnit(text);
+    CHECK_DIAGNOSTICS_EMPTY;
+}
+
+TEST_CASE("super.new inside begin/end block -- not first statement") {
+    auto& text = R"(
+class A;
+    function new;
+    endfunction
+endclass
+
+class B extends A;
+    function new;
+        begin
+            $display("Test");
+            super.new();
+        end
+    endfunction
+endclass
+)";
+
+    parseCompilationUnit(text);
+
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::InvalidSuperNew);
 }
 
 TEST_CASE("Bind directive parsing") {
@@ -1531,7 +1590,7 @@ task:
 )";
 
     parseCompilationUnit(text, LanguageVersion::v1800_2023);
-    REQUIRE(diagnostics.size() == 3);
+    REQUIRE(diagnostics.size() == 1);
 }
 
 TEST_CASE("Nested attributes are not allowed") {
@@ -1625,4 +1684,41 @@ TEST_CASE("No trailing comma in ANSI port list still works") {
     REQUIRE(module.kind == SyntaxKind::ModuleDeclaration);
     CHECK(module.header->ports->kind == SyntaxKind::AnsiPortList);
     CHECK_DIAGNOSTICS_EMPTY;
+}
+
+TEST_CASE("Regress for malformed diag with empty duplicate function specifiers") {
+    auto& text = R"(
+function:o:
+)";
+
+    parseCompilationUnit(text, LanguageVersion::v1800_2023);
+    REQUIRE(diagnostics.size() == 2);
+}
+
+TEST_CASE("Typo keyword in parseMember - 'alwasy' close to 'always'") {
+    // 'alwasy' should trigger TypoKeyword in parseMember
+    auto& text = R"(
+module m;
+    alwasy @(posedge clk) begin end
+endmodule
+)";
+    parseCompilationUnit(text);
+
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::TypoKeyword);
+}
+
+TEST_CASE("Typo keyword in expected location") {
+    // 'alwasy' should trigger TypoKeyword in parseMember
+    auto& text = R"(
+module m;
+    property p;
+        1;
+    endpropety
+endmodule
+)";
+    parseCompilationUnit(text);
+
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::TypoKeyword);
 }

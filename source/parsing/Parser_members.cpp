@@ -6,6 +6,7 @@
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
 #include "slang/diagnostics/ParserDiags.h"
+#include "slang/parsing/LexerFacts.h"
 #include "slang/parsing/Parser.h"
 #include "slang/parsing/Preprocessor.h"
 #include "slang/util/String.h"
@@ -129,9 +130,37 @@ ClassDeclarationSyntax& Parser::parseClass() {
     return parseClassDeclaration(attributes, virtualOrInterface);
 }
 
-MemberSyntax* Parser::parseMember(SyntaxKind parentKind, bool& anyLocalModules) {
-    auto attributes = parseAttributes();
+// Keywords that are candidates for typo correction.
+static constexpr std::array MemberTypoKeywords = {
+    TokenKind::GenerateKeyword,   TokenKind::ModuleKeyword,     TokenKind::AssignKeyword,
+    TokenKind::PackageKeyword,    TokenKind::ProgramKeyword,    TokenKind::CheckerKeyword,
+    TokenKind::InterfaceKeyword,  TokenKind::ModPortKeyword,    TokenKind::CoverGroupKeyword,
+    TokenKind::SpecifyKeyword,    TokenKind::AssertKeyword,     TokenKind::AssumeKeyword,
+    TokenKind::CoverKeyword,      TokenKind::RestrictKeyword,   TokenKind::FinalKeyword,
+    TokenKind::InitialKeyword,    TokenKind::ClassKeyword,      TokenKind::AlwaysKeyword,
+    TokenKind::AlwaysCombKeyword, TokenKind::AlwaysFFKeyword,   TokenKind::AlwaysLatchKeyword,
+    TokenKind::FunctionKeyword,   TokenKind::TaskKeyword,       TokenKind::ClockingKeyword,
+    TokenKind::ExportKeyword,     TokenKind::ImportKeyword,     TokenKind::PropertyKeyword,
+    TokenKind::SequenceKeyword,   TokenKind::ForKeyword,        TokenKind::CaseKeyword,
+    TokenKind::GenVarKeyword,     TokenKind::ConstraintKeyword, TokenKind::RandKeyword,
+    TokenKind::PrimitiveKeyword,  TokenKind::WireKeyword,       TokenKind::InterconnectKeyword,
+    TokenKind::VarKeyword,        TokenKind::AutomaticKeyword,  TokenKind::CHandleKeyword,
+    TokenKind::EventKeyword,      TokenKind::StructKeyword,     TokenKind::UnionKeyword,
+    TokenKind::EnumKeyword,       TokenKind::TypedefKeyword,    TokenKind::NetTypeKeyword,
+    TokenKind::LocalParamKeyword, TokenKind::ParameterKeyword,  TokenKind::LetKeyword,
+    TokenKind::VirtualKeyword,    TokenKind::StringKeyword,     TokenKind::ConstKeyword,
+    TokenKind::BitKeyword,        TokenKind::LogicKeyword,      TokenKind::RegKeyword,
+    TokenKind::ByteKeyword,       TokenKind::ShortIntKeyword,   TokenKind::IntKeyword,
+    TokenKind::LongIntKeyword,    TokenKind::IntegerKeyword,    TokenKind::TimeKeyword,
+    TokenKind::ShortRealKeyword,  TokenKind::RealKeyword,
+};
 
+MemberSyntax* Parser::parseMember(SyntaxKind parentKind, bool& anyLocalModules) {
+    return parseMemberImpl(parseAttributes(), parentKind, anyLocalModules);
+}
+
+MemberSyntax* Parser::parseMemberImpl(AttrList attributes, SyntaxKind parentKind,
+                                      bool& anyLocalModules) {
     if (isHierarchyInstantiation(/* requireName */ false))
         return &parseHierarchyInstantiation(attributes);
     if (isPortDeclaration(/* inStatement */ false))
@@ -196,7 +225,7 @@ MemberSyntax* Parser::parseMember(SyntaxKind parentKind, bool& anyLocalModules) 
         case TokenKind::SpecifyKeyword:
             errorIfAttributes(attributes);
             return &parseSpecifyBlock(attributes);
-        case TokenKind::Identifier:
+        case TokenKind::Identifier: {
             if (peek(1).kind == TokenKind::Colon) {
                 // Declarations and instantiations have already been handled, so if we reach this
                 // point we either have a labeled assertion, or this is some kind of error.
@@ -231,8 +260,34 @@ MemberSyntax* Parser::parseMember(SyntaxKind parentKind, bool& anyLocalModules) 
                 return &parseCheckerInstantiation(attributes);
             }
 
+            // Check whether this identifier looks like a typo for a member-starting keyword.
+            // If so issue a diagnostic and then replace the current token with one using the
+            // corrected keyword type.
+            TokenKind bestKw = TokenKind::Unknown;
+            int bestDist = INT_MAX;
+            const auto identText = token.valueText();
+            for (auto kw : MemberTypoKeywords) {
+                int dist = editDistance(identText, LexerFacts::getTokenKindText(kw), bestDist);
+                if (dist < bestDist) {
+                    bestKw = kw;
+                    bestDist = dist;
+                }
+            }
+
+            if (bestDist > 0 && identText.length() / size_t(bestDist) >= 3) {
+                addDiag(diag::TypoKeyword, token.range())
+                    << identText << LexerFacts::getTokenKindText(bestKw);
+                skipToken({});
+
+                auto newTok = Token::createMissing(alloc, bestKw, token.location());
+                replaceCurrentToken(newTok);
+
+                return parseMemberImpl(attributes, parentKind, anyLocalModules);
+            }
+
             // Otherwise, assume it's an (erroneous) attempt at a variable declaration.
             return &parseVariableDeclaration(attributes);
+        }
         case TokenKind::UnitSystemName: {
             // The only valid thing this can be is a checker instantiation, since
             // variable declarations would have been handled previously. Because these
@@ -1027,7 +1082,7 @@ std::span<syntax::ClassSpecifierSyntax*> Parser::parseClassSpecifierList(bool al
         auto specifier = parseClassSpecifier();
         SLANG_ASSERT(specifier);
 
-        if (!specifier->keyword.isMissing()) {
+        if (specifier->keyword && !specifier->keyword.isMissing()) {
             if (specifiers.empty() && !allowSpecifiers)
                 addDiag(diag::SpecifiersNotAllowed, specifier->sourceRange());
 
@@ -1047,7 +1102,7 @@ std::span<syntax::ClassSpecifierSyntax*> Parser::parseClassSpecifierList(bool al
                     break;
                 }
 
-                if (!ok.isMissing() && ok.kind != TokenKind::FinalKeyword &&
+                if (ok && !ok.isMissing() && ok.kind != TokenKind::FinalKeyword &&
                     sk.kind != TokenKind::FinalKeyword) {
                     addDiag(diag::ClassSpecifierConflict, sk.range())
                         << sk.valueText() << ok.range() << ok.valueText();
@@ -1312,10 +1367,14 @@ MemberSyntax* Parser::parseClassMember(bool isIfaceClass, bool hasBaseClass) {
 
             errorIfIface(decl);
         }
-        else if (decl.kind == SyntaxKind::PackageImportDeclaration ||
-                 decl.kind == SyntaxKind::NetTypeDeclaration ||
+        else if (decl.kind == SyntaxKind::PackageImportDeclaration) {
+            // Package imports are not allowed in classes per the LRM but are supported
+            // by some tools (e.g. VCS); emit a separate downgradable diagnostic.
+            addDiag(diag::PackageImportInClass, decl.sourceRange());
+        }
+        else if (decl.kind == SyntaxKind::NetTypeDeclaration ||
                  decl.kind == SyntaxKind::LetDeclaration) {
-            // Nettypes and package imports are disallowed in classes.
+            // Nettypes and let declarations are disallowed in classes.
             addDiag(diag::NotAllowedInClass, decl.sourceRange());
         }
         else {
@@ -1414,8 +1473,11 @@ MemberSyntax* Parser::parseClassMember(bool isIfaceClass, bool hasBaseClass) {
 
         // Pure or extern functions don't have bodies.
         if (isPureOrExtern) {
+            // Note: the grammar in the LRM does not allow an implicit return type
+            // here but all other tools do so we do as well for compatibility.
             auto& proto = parseFunctionPrototype(SyntaxKind::ClassDeclaration,
-                                                 funcOptions | FunctionOptions::IsPrototype);
+                                                 funcOptions | FunctionOptions::IsPrototype |
+                                                     FunctionOptions::AllowImplicitReturn);
             checkProto(proto, false);
 
             // Final specifier is illegal on pure virtual methods.
@@ -1841,13 +1903,27 @@ BlockEventExpressionSyntax& Parser::parseBlockEventExpression() {
     return left;
 }
 
+static bool nameHasSelects(const NameSyntax& name) {
+    if (name.kind == SyntaxKind::IdentifierSelectName)
+        return true;
+    if (name.kind == SyntaxKind::ScopedName) {
+        auto& scoped = name.as<ScopedNameSyntax>();
+        return nameHasSelects(*scoped.left) || nameHasSelects(*scoped.right);
+    }
+    return false;
+}
+
 CoverCrossSyntax* Parser::parseCoverCross(AttrList attributes, NamedLabelSyntax* label) {
     auto keyword = expect(TokenKind::CrossKeyword);
 
     SmallVector<TokenOrSyntax, 8> buffer;
     while (true) {
-        auto name = expect(TokenKind::Identifier);
-        buffer.push_back(&factory.identifierName(name));
+        auto& name = parseName();
+        if (nameHasSelects(name))
+            addDiag(diag::CoverCrossSelectNotAllowed, name.sourceRange());
+        else if (name.kind != SyntaxKind::IdentifierName)
+            addDiag(diag::NonstandardHierarchicalCross, name.sourceRange());
+        buffer.push_back(&name);
         if (!peek(TokenKind::Comma))
             break;
 

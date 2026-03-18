@@ -14,14 +14,7 @@
 #include "slang/ast/SemanticFacts.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
-#include "slang/diagnostics/AnalysisDiags.h"
-#include "slang/diagnostics/DeclarationsDiags.h"
-#include "slang/diagnostics/ExpressionsDiags.h"
 #include "slang/diagnostics/JsonDiagnosticClient.h"
-#include "slang/diagnostics/LookupDiags.h"
-#include "slang/diagnostics/ParserDiags.h"
-#include "slang/diagnostics/StatementsDiags.h"
-#include "slang/diagnostics/SysFuncsDiags.h"
 #include "slang/diagnostics/TextDiagnosticClient.h"
 #include "slang/driver/SourceLoader.h"
 #include "slang/parsing/Parser.h"
@@ -41,35 +34,6 @@ using namespace ast;
 using namespace parsing;
 using namespace syntax;
 using namespace analysis;
-
-// clang-format off
-#define VCS_COMP_FLAGS \
-    CompilationFlags::AllowHierarchicalConst, \
-    CompilationFlags::RelaxEnumConversions, \
-    CompilationFlags::AllowUseBeforeDeclare, \
-    CompilationFlags::RelaxStringConversions, \
-    CompilationFlags::AllowRecursiveImplicitCall, \
-    CompilationFlags::AllowBareValParamAssignment, \
-    CompilationFlags::AllowSelfDeterminedStreamConcat, \
-    CompilationFlags::AllowMergingAnsiPorts
-
-static constexpr auto vcsCompFlags = {VCS_COMP_FLAGS};
-static constexpr auto allCompFlags = {
-    VCS_COMP_FLAGS,
-    CompilationFlags::AllowTopLevelIfacePorts,
-    CompilationFlags::AllowUnnamedGenerate,
-    CompilationFlags::AllowVirtualIfaceWithOverride
-};
-
-#define VCS_ANALYSIS_FLAGS \
-    AnalysisFlags::AllowMultiDrivenLocals
-
-static constexpr auto vcsAnalysisFlags = {VCS_ANALYSIS_FLAGS};
-static constexpr auto allAnalysisFlags = {
-    VCS_ANALYSIS_FLAGS,
-    AnalysisFlags::AllowDupInitialDrivers
-};
-// clang-format on
 
 Driver::Driver() : diagEngine(sourceManager), sourceLoader(sourceManager) {
     textDiagClient = std::make_shared<TextDiagnosticClient>();
@@ -137,6 +101,9 @@ void Driver::addStandardArgs() {
         "be parsed using the provided language keywords version, as if they contained a "
         "`begin_keywords directive. For example '1364-2005+*.v,*.vh'",
         "<keyword-version>+<file-pattern>[,...]. ");
+    cmdLine.add("--allow-macro-trailing-space", options.allowMacroTrailingSpace,
+                "If true, the preprocessor will allow trailing whitespaces after the continuation "
+                "character in a macro definition");
 
     // Legacy vendor commands support
     cmdLine.add(
@@ -570,29 +537,20 @@ bool Driver::processOptions() {
         }
     }
 
-    if (options.compat.has_value()) {
-        std::initializer_list<CompilationFlags> compFlags;
-        std::initializer_list<AnalysisFlags> analysisFlags;
-        if (options.compat == CompatMode::Vcs) {
-            compFlags = vcsCompFlags;
-            analysisFlags = vcsAnalysisFlags;
-        }
-        else {
-            compFlags = allCompFlags;
-            analysisFlags = allAnalysisFlags;
-        }
+    CompatSettings compatSettings;
+    if (options.compat.has_value())
+        compatSettings.setMode(*options.compat);
 
-        for (auto flag : compFlags) {
-            auto& option = options.compilationFlags.at(flag);
-            if (!option.has_value())
-                option = true;
-        }
+    for (auto flag : compatSettings.getCompilationFlags()) {
+        auto& option = options.compilationFlags.at(flag);
+        if (!option.has_value())
+            option = true;
+    }
 
-        for (auto flag : analysisFlags) {
-            auto& option = options.analysisFlags.at(flag);
-            if (!option.has_value())
-                option = true;
-        }
+    for (auto flag : compatSettings.getAnalysisFlags()) {
+        auto& option = options.analysisFlags.at(flag);
+        if (!option.has_value())
+            option = true;
     }
 
     if (options.librariesInheritMacros == true && !options.singleUnit.value_or(false)) {
@@ -677,47 +635,10 @@ bool Driver::processOptions() {
 
     diagEngine.setErrorLimit((int)options.errorLimit.value_or(20));
 
-    // Some tools violate the standard in various ways, but in order to allow
-    // compatibility with these tools we change the respective errors into a
-    // suppressible warning that we promote to an error by default. This allows
-    // the user to turn this back into a warning, or turn it off altogether.
-
-    if (options.compat != CompatMode::All) {
-        diagEngine.setSeverity(diag::DuplicateDefinition, DiagnosticSeverity::Error);
-        diagEngine.setSeverity(diag::BadProceduralForce, DiagnosticSeverity::Error);
-        diagEngine.setSeverity(diag::UnknownSystemName, DiagnosticSeverity::Error);
-        diagEngine.setSeverity(diag::NonstandardStringConcat, DiagnosticSeverity::Error);
-        diagEngine.setSeverity(diag::MixedVarAssigns, DiagnosticSeverity::Error);
-        diagEngine.setSeverity(diag::MultipleContAssigns, DiagnosticSeverity::Error);
-        diagEngine.setSeverity(diag::MultipleAlwaysAssigns, DiagnosticSeverity::Error);
-        diagEngine.setSeverity(diag::MisplacedTrailingSeparator, DiagnosticSeverity::Error);
-    }
-
-    if (options.compat == CompatMode::Vcs || options.compat == CompatMode::All) {
-        diagEngine.setSeverity(diag::StaticInitializerMustBeExplicit, DiagnosticSeverity::Ignored);
-        diagEngine.setSeverity(diag::ImplicitConvert, DiagnosticSeverity::Ignored);
-        diagEngine.setSeverity(diag::BadFinishNum, DiagnosticSeverity::Ignored);
-        diagEngine.setSeverity(diag::NonstandardSysFunc, DiagnosticSeverity::Ignored);
-        diagEngine.setSeverity(diag::NonstandardForeach, DiagnosticSeverity::Ignored);
-        diagEngine.setSeverity(diag::NonstandardDist, DiagnosticSeverity::Ignored);
-    }
-    else {
-        // These warnings are set to Error severity by default, unless we're in vcs compat mode.
-        // The user can always downgrade via warning options, which get set after this.
-        diagEngine.setSeverity(diag::IndexOOB, DiagnosticSeverity::Error);
-        diagEngine.setSeverity(diag::RangeOOB, DiagnosticSeverity::Error);
-        diagEngine.setSeverity(diag::RangeWidthOOB, DiagnosticSeverity::Error);
-        diagEngine.setSeverity(diag::ImplicitNamedPortTypeMismatch, DiagnosticSeverity::Error);
-        diagEngine.setSeverity(diag::SplitDistWeightOp, DiagnosticSeverity::Error);
-        diagEngine.setSeverity(diag::DPIPureTask, DiagnosticSeverity::Error);
-        diagEngine.setSeverity(diag::SpecifyPathConditionExpr, DiagnosticSeverity::Error);
-        diagEngine.setSeverity(diag::SolveBeforeDisallowed, DiagnosticSeverity::Error);
-        diagEngine.setSeverity(diag::DynamicNotProcedural, DiagnosticSeverity::Error);
-    }
+    compatSettings.configureDiagnostics(diagEngine);
 
     Diagnostics optionDiags = diagEngine.setWarningOptions(options.warningOptions);
-    for (auto& diag : optionDiags)
-        diagEngine.issue(diag);
+    diagEngine.issue(optionDiags);
 
     return true;
 }
@@ -733,8 +654,7 @@ static std::string generateRandomAlphaString(TGenerator& gen, size_t len) {
     return result;
 }
 
-bool Driver::runPreprocessor(bool includeComments, bool includeDirectives, bool obfuscateIds,
-                             bool useFixedObfuscationSeed) {
+bool Driver::runPreprocessor(bitmask<PreprocessOutputFlags> flags) {
     BumpAllocator alloc;
     Diagnostics diagnostics;
     Preprocessor preprocessor(sourceManager, alloc, diagnostics, createParseOptionBag());
@@ -743,15 +663,17 @@ bool Driver::runPreprocessor(bool includeComments, bool includeDirectives, bool 
     for (auto it = buffers.rbegin(); it != buffers.rend(); it++)
         preprocessor.pushSource(*it);
 
-    SyntaxPrinter output;
-    output.setIncludeComments(includeComments);
-    output.setIncludeDirectives(includeDirectives);
+    SyntaxPrinter output(sourceManager);
+    output.setIncludeComments(flags.has(PreprocessOutputFlags::IncludeComments));
+    output.setIncludeDirectives(flags.has(PreprocessOutputFlags::IncludeDirectives));
+    output.setIncludeSource(flags.has(PreprocessOutputFlags::IncludeSourceInfo));
+    output.setIncludeAllLocations(true);
 
     std::optional<std::mt19937> rng;
     flat_hash_map<std::string, std::string> obfuscationMap;
 
-    if (obfuscateIds) {
-        if (useFixedObfuscationSeed)
+    if (flags.has(PreprocessOutputFlags::ObfuscateIds)) {
+        if (flags.has(PreprocessOutputFlags::UseFixedObfuscationSeed))
             rng.emplace();
         else
             rng = createRandomGenerator<std::mt19937>();
@@ -770,7 +692,7 @@ bool Driver::runPreprocessor(bool includeComments, bool includeDirectives, bool 
             } while (SyntaxFacts::isPossibleVectorDigit(token.kind));
         }
 
-        if (obfuscateIds && token.kind == TokenKind::Identifier) {
+        if (flags.has(PreprocessOutputFlags::ObfuscateIds) && token.kind == TokenKind::Identifier) {
             auto name = std::string(token.valueText());
             auto translation = obfuscationMap.find(name);
             if (translation == obfuscationMap.end()) {
@@ -797,7 +719,7 @@ bool Driver::runPreprocessor(bool includeComments, bool includeDirectives, bool 
     return true;
 }
 
-void Driver::reportMacros() {
+void Driver::reportMacros(bool groupByFile) {
     Bag optionBag;
     addParseOptions(optionBag);
 
@@ -815,7 +737,7 @@ void Driver::reportMacros() {
             break;
     }
 
-    for (auto macro : preprocessor.getDefinedMacros()) {
+    auto printMacro = [](const syntax::DefineDirectiveSyntax* macro) {
         SyntaxPrinter printer;
         printer.setIncludeComments(false);
         printer.setIncludeTrivia(false);
@@ -831,6 +753,25 @@ void Driver::reportMacros() {
         printer.print(macro->body);
 
         OS::print(fmt::format("{}\n", printer.str()));
+    };
+
+    if (groupByFile) {
+        std::map<std::string_view, std::vector<const syntax::DefineDirectiveSyntax*>> byFile;
+        for (auto macro : preprocessor.getDefinedMacros()) {
+            auto location = sourceManager.getFullyOriginalLoc(macro->directive.location());
+            auto fileName = sourceManager.getFileName(location);
+            byFile[fileName].push_back(macro);
+        }
+
+        for (auto& [fileName, macros] : byFile) {
+            OS::print(fmt::format("//{}:\n", fileName));
+            for (auto macro : macros)
+                printMacro(macro);
+        }
+    }
+    else {
+        for (auto macro : preprocessor.getDefinedMacros())
+            printMacro(macro);
     }
 }
 
@@ -1017,8 +958,11 @@ bool Driver::parseAllSources() {
         return false;
 
     Diagnostics pragmaDiags = diagEngine.setMappingsFromPragmas();
-    for (auto& diag : pragmaDiags)
-        diagEngine.issue(diag);
+    diagEngine.issue(pragmaDiags);
+
+    Diagnostics bufferDiags = diagEngine.setBufferWarningOptions(
+        sourceLoader.getBufferWarningOptions());
+    diagEngine.issue(bufferDiags);
 
     return true;
 }
@@ -1062,6 +1006,9 @@ void Driver::addParseOptions(Bag& bag) const {
 
     if (loptions.enableLegacyProtect)
         loptions.commentHandlers["pragma"]["protect"] = {CommentHandler::Protect};
+
+    loptions.allowMacroTrailingSpace = options.allowMacroTrailingSpace.value_or(options.compat ==
+                                                                                CompatMode::Vcs);
 
     for (auto& [common, start, end] : translateOffFormats)
         loptions.commentHandlers[common][start] = {CommentHandler::TranslateOff, end};
@@ -1130,7 +1077,7 @@ analysis::AnalysisOptions Driver::getAnalysisOptions() const {
 
     AnalysisOptions ao;
     ao.numThreads = options.numThreads.value_or(0);
-    ao.flags |= AnalysisFlags::CheckUnused;
+    ao.flags |= AnalysisFlags::CheckUnused | AnalysisFlags::CheckShadow;
     if (options.maxCaseAnalysisSteps)
         ao.maxCaseAnalysisSteps = *options.maxCaseAnalysisSteps;
     if (options.maxLoopAnalysisSteps)
@@ -1170,8 +1117,7 @@ bool Driver::reportParseDiags() {
         diags.append_range(tree->diagnostics());
 
     diags.sort(sourceManager);
-    for (auto& diag : diags)
-        diagEngine.issue(diag);
+    diagEngine.issue(diags);
 
     OS::printE(fmt::format("{}", textDiagClient->getString()));
     return diagEngine.getNumErrors() == 0;
@@ -1188,8 +1134,7 @@ void Driver::reportCompilation(Compilation& compilation, bool quiet) {
         }
     }
 
-    for (auto& diag : compilation.getAllDiagnostics())
-        diagEngine.issue(diag);
+    diagEngine.issue(compilation.getAllDiagnostics());
 }
 
 std::unique_ptr<AnalysisManager> Driver::runAnalysis(ast::Compilation& compilation) {
@@ -1203,9 +1148,7 @@ std::unique_ptr<AnalysisManager> Driver::runAnalysis(ast::Compilation& compilati
     // We'll just return an empty analysis manager in that case.
     if (!options.lintMode()) {
         analysisManager->analyze(compilation);
-
-        for (auto& diag : analysisManager->getDiagnostics())
-            diagEngine.issue(diag);
+        diagEngine.issue(analysisManager->getDiagnostics());
     }
 
     compilation.unfreeze();
@@ -1272,6 +1215,9 @@ bool Driver::parseUnitListing(std::string_view text) {
     std::optional<std::string> libraryName;
     unitCmdLine.add("--library", libraryName, "");
 
+    std::vector<std::string> warningOptions;
+    unitCmdLine.add("-W", warningOptions, "Control the specified warning", "<warning>");
+
     unitCmdLine.add(
         "-C",
         [this](std::string_view value) {
@@ -1308,7 +1254,8 @@ bool Driver::parseUnitListing(std::string_view text) {
     }
 
     sourceLoader.addSeparateUnit(files, includes, std::move(defines),
-                                 std::move(libraryName).value_or(std::string()));
+                                 std::move(libraryName).value_or(std::string()),
+                                 std::move(warningOptions));
 
     return true;
 }
