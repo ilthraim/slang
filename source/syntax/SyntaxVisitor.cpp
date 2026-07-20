@@ -35,6 +35,20 @@ struct CloneVisitor {
         return triviaBuffer.copy(alloc);
     }
 
+    // Resolve a replacement node before it is spliced into the cloned tree.
+    SyntaxNode* resolveReplacement(SyntaxNode* rep) {
+        for (;;) {
+            auto it = commits.removeOrReplace.find(rep);
+            if (it == commits.removeOrReplace.end())
+                break;
+            auto* replaceChange = std::get_if<ReplaceChange>(&it->second);
+            if (!replaceChange || replaceChange->second == rep)
+                break;
+            rep = replaceChange->second;
+        }
+        return rep->visit(*this);
+    }
+
 #ifdef _MSC_VER
 #    pragma warning(push)
 #    pragma warning(disable : 4127) // conditional expression is constant
@@ -135,9 +149,9 @@ struct CloneVisitor {
                 it != commits.removeOrReplace.end()) {
                 if (auto replaceChange = std::get_if<ReplaceChange>(&it->second)) {
                     if constexpr (IsList)
-                        listBuffer.push_back(replaceChange->second);
+                        listBuffer.push_back(resolveReplacement(replaceChange->second));
                     else
-                        cloned->setChild(i, replaceChange->second);
+                        cloned->setChild(i, resolveReplacement(replaceChange->second));
                 }
                 else {
                     if constexpr (!IsList) {
