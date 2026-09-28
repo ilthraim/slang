@@ -809,6 +809,48 @@ endmodule
 )");
 }
 
+TEST_CASE("Syntax rewriter -- replacements compose when nested") {
+    // `a & b & c` parses as `(a & b) & c`, so the outer expression's left operand
+    // is the inner expression, and each gets its own replacement.
+    auto tree = SyntaxTree::fromText("module m; assign x = a & b & c; endmodule");
+
+    SECTION("replacement reuses a node that is itself replaced") {
+        // Rebuild every `&` as `|` around its original operands. The outer
+        // replacement reuses the inner expression node, whose own replacement
+        // must still apply inside it.
+        struct Rewriter : public SyntaxRewriter<Rewriter> {
+            void handle(const BinaryExpressionSyntax& node) {
+                if (node.kind == SyntaxKind::BinaryAndExpression) {
+                    replace(node,
+                            factory.binaryExpression(
+                                SyntaxKind::BinaryOrExpression, *node.left,
+                                makeToken(TokenKind::Or, "|", std::span(&SingleSpace, size_t(1))),
+                                SyntaxList<AttributeInstanceSyntax>{}, *node.right));
+                }
+                visitDefault(node);
+            }
+        };
+
+        auto result = SyntaxPrinter::printFile(*Rewriter().transform(tree));
+        CHECK(result == "module m; assign x = a | b | c; endmodule");
+    }
+
+    SECTION("replacement is a node that is itself replaced") {
+        // Replace every `&` with its left operand. The outer expression's
+        // replacement is the inner expression, which is in turn replaced by `a`.
+        struct Rewriter : public SyntaxRewriter<Rewriter> {
+            void handle(const BinaryExpressionSyntax& node) {
+                if (node.kind == SyntaxKind::BinaryAndExpression)
+                    replace(node, *node.left);
+                visitDefault(node);
+            }
+        };
+
+        auto result = SyntaxPrinter::printFile(*Rewriter().transform(tree));
+        CHECK(result == "module m; assign x = a; endmodule");
+    }
+}
+
 TEST_CASE("Remove token from tree without preserving trivia") {
     auto tree = SyntaxTree::fromText(R"(
 module m;

@@ -36,6 +36,20 @@ struct CloneVisitor {
         return triviaBuffer.copy(alloc);
     }
 
+    // Resolve a replacement node before it is spliced into the cloned tree.
+    SyntaxNode* resolveReplacement(SyntaxNode* rep) {
+        for (;;) {
+            auto it = commits.removeOrReplace.find(rep);
+            if (it == commits.removeOrReplace.end())
+                break;
+            auto* replaceChange = std::get_if<ReplaceChange>(&it->second);
+            if (!replaceChange || replaceChange->second == rep)
+                break;
+            rep = replaceChange->second;
+        }
+        return rep->visit(*this);
+    }
+
 #ifdef _MSC_VER
 #    pragma warning(push)
 #    pragma warning(disable : 4127) // conditional expression is constant
@@ -105,7 +119,7 @@ struct CloneVisitor {
             if (auto it = commits.removeOrReplace.find(child);
                 it != commits.removeOrReplace.end()) {
                 if (auto replaceChange = std::get_if<ReplaceChange>(&it->second)) {
-                    listBuffer.push_back(replaceChange->second);
+                    listBuffer.push_back(resolveReplacement(replaceChange->second));
                 }
                 else {
                     skipSeparator = true; // remove separator related to removed node
@@ -183,7 +197,7 @@ struct CloneVisitor {
 
         if (auto it = commits.removeOrReplace.find(child); it != commits.removeOrReplace.end()) {
             if (auto replaceChange = std::get_if<ReplaceChange>(&it->second)) {
-                cloned.setChild(dstIndex, replaceChange->second);
+                cloned.setChild(dstIndex, resolveReplacement(replaceChange->second));
             }
             else {
                 static SyntaxNode* emptyNode = nullptr;
