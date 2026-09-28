@@ -3,7 +3,14 @@
 
 from pathlib import Path
 
-from pyslang.ast import Compilation, ScriptSession, SymbolKind
+import pytest
+from pyslang.ast import (
+    ASTContext,
+    Compilation,
+    LookupLocation,
+    ScriptSession,
+    SymbolKind,
+)
 from pyslang.parsing import LexerOptions, ParserOptions
 from pyslang.syntax import SyntaxKind, SyntaxTree
 
@@ -170,6 +177,32 @@ def test_symbol_inspection():
     assert t.isPackedArray
     assert t.bitWidth == 32
     assert str(t) == "logic[31:0]"
+
+
+def test_ast_context_from_scope_symbol():
+    """An ASTContext can be built from a symbol that is also a Scope.
+
+    Symbols such as InstanceBodySymbol inherit Scope in C++ but only Symbol in
+    Python, so they need their own ASTContext constructor, as EvalContext has.
+    """
+    comp = Compilation()
+    comp.addSyntaxTree(
+        SyntaxTree.fromText(
+            "module m; localparam int P = 3; wire [7:0] w = P + 4; endmodule"
+        )
+    )
+    comp.getAllDiagnostics()
+
+    body = comp.getRoot().topInstances[0].body
+    ctx = ASTContext(body, LookupLocation.max)
+    assert ctx.scope is not None
+
+    net = body.lookupName("w")
+    assert ctx.tryEval(net.initializer).value == 7
+
+    # A symbol that is not a scope is rejected, not reinterpreted.
+    with pytest.raises(ValueError):
+        ASTContext(net, LookupLocation.max)
 
 
 def test_string_to_ast_to_string_loop() -> None:

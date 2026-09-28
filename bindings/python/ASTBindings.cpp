@@ -151,6 +151,18 @@ void registerAST(nb::module_& m) {
     nb::class_<ASTContext>(m, "ASTContext")
         .def(nb::init<const Scope&, LookupLocation, bitmask<ASTFlags>>(), "scope"_a,
              "lookupLocation"_a, "flags"_a = ASTFlags::None)
+        .def(
+            "__init__",
+            // Scope-bearing symbols (e.g. InstanceBodySymbol) are not Python
+            // subclasses of Scope under nanobind; accept them directly, as the
+            // EvalContext binding above does.
+            [](ASTContext* self, const Symbol& symbol, LookupLocation lookupLocation,
+               bitmask<ASTFlags> flags) {
+                if (!symbol.isScope())
+                    throw std::invalid_argument("Symbol must be a scope to build an ASTContext");
+                new (self) ASTContext(symbol.as<Scope>(), lookupLocation, flags);
+            },
+            "scope"_a, "lookupLocation"_a, "flags"_a = ASTFlags::None, nb::keep_alive<1, 2>())
         .def_ro("scope", &ASTContext::scope)
         .def_ro("lookupIndex", &ASTContext::lookupIndex)
         .def_ro("flags", &ASTContext::flags)
